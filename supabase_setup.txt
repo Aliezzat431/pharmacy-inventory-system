@@ -1,0 +1,168 @@
+-- === AetherRx Supabase Schema ===
+-- Copy and paste this into the Supabase SQL Editor
+
+-- Enable UUID extension
+create extension if not exists "uuid-ossp";
+
+-- 1. Users table
+create table if not exists public.users (
+    id uuid default uuid_generate_v4() primary key,
+    username text unique not null,
+    password text not null,
+    role text check (role in ('master', 'employee')) default 'employee',
+    active boolean default true,
+    base_salary numeric default 0,
+    pharmacy_id text default '1',
+    created_at timestamp with time zone default now(),
+    updated_at timestamp with time zone default now()
+);
+
+-- 2. Sessions table
+create table if not exists public.sessions (
+    id uuid default uuid_generate_v4() primary key,
+    user_id uuid references public.users(id),
+    username text,
+    start_time timestamp with time zone default now(),
+    end_time timestamp with time zone,
+    shift_type text check (shift_type in ('morning', 'night')),
+    status text check (status in ('active', 'closed')) default 'active',
+    device_info text,
+    pharmacy_id text,
+    created_at timestamp with time zone default now()
+);
+
+-- 3. Products table
+create table if not exists public.products (
+    id uuid default uuid_generate_v4() primary key,
+    name text not null,
+    category text,
+    type text,
+    unit text,
+    unit_options jsonb default '[]',
+    unit_conversion numeric default 1,
+    is_shortcoming boolean default false,
+    low_stock_threshold numeric default 5,
+    company text,
+    details text,
+    pharmacy_id text default '1',
+    inventory_method text default 'FEFO',
+    created_at timestamp with time zone default now(),
+    updated_at timestamp with time zone default now()
+);
+
+-- 4. Batches table
+create table if not exists public.batches (
+    id uuid default uuid_generate_v4() primary key,
+    product_id uuid references public.products(id) on delete cascade,
+    barcode text,
+    quantity numeric default 0,
+    purchase_price numeric default 0,
+    selling_price numeric default 0,
+    expiry_date timestamp with time zone,
+    purchase_date timestamp with time zone default now(),
+    supplier text,
+    invoice_number text,
+    batch_number text,
+    is_active boolean default true,
+    notes text,
+    created_at timestamp with time zone default now(),
+    updated_at timestamp with time zone default now()
+);
+
+-- 5. Debtors table
+create table if not exists public.debtors (
+    id uuid default uuid_generate_v4() primary key,
+    name text not null,
+    phone text,
+    partial_payments numeric default 0,
+    pharmacy_id text default '1',
+    created_at timestamp with time zone default now()
+);
+
+-- 6. Orders table
+create table if not exists public.orders (
+    id uuid default uuid_generate_v4() primary key,
+    debtor_id uuid references public.debtors(id) on delete set null,
+    total numeric default 0,
+    total_purchase_price numeric default 0,
+    items jsonb default '[]',
+    payment_method text default 'cash',
+    pharmacy_id text default '1',
+    created_at timestamp with time zone default now()
+);
+
+-- 7. Winnings table (Financial Transactions)
+create table if not exists public.winnings (
+    id uuid default uuid_generate_v4() primary key,
+    amount numeric not null,
+    profit numeric default 0,
+    reason text,
+    transaction_type text check (transaction_type in ('in', 'out', 'withdrawal', 'sadaqah', 'sadaqahPaid', 'suspended', 'return', 'salary')),
+    date timestamp with time zone default now(),
+    debtor_id uuid references public.debtors(id) on delete set null,
+    invoice_number text,
+    supplier text,
+    metadata jsonb default '{}',
+    pharmacy_id text default '1',
+    created_at timestamp with time zone default now()
+);
+
+-- 8. Activities table (Logs)
+create table if not exists public.activities (
+    id uuid default uuid_generate_v4() primary key,
+    action text not null,
+    user_id text,
+    username text default 'النظام',
+    description text,
+    metadata jsonb default '{}',
+    created_at timestamp with time zone default now()
+);
+
+-- 9. Settings table
+create table if not exists public.settings (
+    key text primary key,
+    value text,
+    created_at timestamp with time zone default now(),
+    updated_at timestamp with time zone default now()
+);
+
+-- 10. Companies table
+create table if not exists public.companies (
+    id uuid default uuid_generate_v4() primary key,
+    name text unique not null,
+    created_at timestamp with time zone default now()
+);
+
+-- 11. Counters table (for invoice generation)
+create table if not exists public.counters (
+    id uuid default uuid_generate_v4() primary key,
+    name text unique not null,
+    prefix text,
+    current_value integer default 0,
+    last_updated timestamp with time zone default now()
+);
+
+-- 12. Messages table (for chat)
+create table if not exists public.messages (
+    id uuid default uuid_generate_v4() primary key,
+    sender text,
+    content text,
+    pharmacy_id text default '1',
+    created_at timestamp with time zone default now()
+);
+
+-- Create some indexes for performance
+create index if not exists idx_products_name on public.products(name);
+create index if not exists idx_batches_barcode on public.batches(barcode);
+create index if not exists idx_batches_product_id on public.batches(product_id);
+create index if not exists idx_winnings_date on public.winnings(date);
+create index if not exists idx_activities_created_at on public.activities(created_at);
+create index if not exists idx_counters_name on public.counters(name);
+create index if not exists idx_messages_created_at on public.messages(created_at);
+
+-- Set some default values for counters if they don't exist
+insert into public.counters (name, prefix, current_value) values 
+('sale', 'SALE', 0),
+('return', 'RET', 0),
+('charity', 'CHR', 0)
+on conflict (name) do nothing;

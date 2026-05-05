@@ -1,0 +1,830 @@
+"use client";
+
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+} from "react";
+
+import Cookies from "js-cookie";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Search,
+  RotateCcw,
+  Package,
+  Calendar,
+  ChevronLeft,
+  X,
+  Minus,
+  Plus,
+  Receipt,
+  AlertCircle,
+  Clock,
+  TrendingUp,
+  RefreshCw,
+  CheckCircle2,
+} from "lucide-react";
+
+import { useToast } from "../components/ToastContext";
+
+/* -------------------------------------------------------------------------- */
+/*                                   Config                                   */
+/* -------------------------------------------------------------------------- */
+
+const STEPS = {
+  SELECT_INVOICE: 1,
+  SELECT_PRODUCTS: 2,
+  CONFIRM: 3,
+};
+
+const initialState = {
+  transactions: [],
+  selectedTransaction: null,
+  returnItems: [],
+  returnReason: "",
+  loading: false,
+  submitting: false,
+  error: null,
+};
+
+/* -------------------------------------------------------------------------- */
+/*                                  Reducer                                   */
+/* -------------------------------------------------------------------------- */
+
+function reducer(state, action) {
+  switch (action.type) {
+    case "SET_LOADING":
+      return { ...state, loading: action.payload, error: null };
+    case "SET_SUBMITTING":
+      return { ...state, submitting: action.payload, error: null };
+    case "SET_TRANSACTIONS":
+      return { ...state, transactions: action.payload, error: null };
+    case "SET_SELECTED_TRANSACTION":
+      return { ...state, selectedTransaction: action.payload, error: null };
+    case "SET_RETURN_REASON":
+      return { ...state, returnReason: action.payload };
+    case "SET_ERROR":
+      return { ...state, error: action.payload };
+    case "RESET":
+      return { ...initialState, transactions: state.transactions };
+    case "ADD_ITEM": {
+      const existing = state.returnItems.find(
+        (i) =>
+          i.productId === action.payload.productId &&
+          i.unit === action.payload.unit
+      );
+      if (existing) {
+        return {
+          ...state,
+          returnItems: state.returnItems.map((i) =>
+            i.productId === action.payload.productId &&
+            i.unit === action.payload.unit
+              ? {
+                  ...i,
+                  quantity: Math.min(i.quantity + 1, i.maxQuantity),
+                  total: Math.min(i.quantity + 1, i.maxQuantity) * i.price,
+                }
+              : i
+          ),
+        };
+      }
+      return {
+        ...state,
+        returnItems: [
+          ...state.returnItems,
+          { ...action.payload, quantity: 1, total: action.payload.price },
+        ],
+      };
+    }
+    case "UPDATE_QUANTITY": {
+      const updated = [...state.returnItems];
+      const item = updated[action.index];
+      if (!item) return state;
+      const qty = Math.max(0, Math.min(action.quantity, item.maxQuantity));
+      if (qty <= 0) {
+        return {
+          ...state,
+          returnItems: state.returnItems.filter((_, i) => i !== action.index),
+        };
+      }
+      updated[action.index] = { ...item, quantity: qty, total: qty * item.price };
+      return { ...state, returnItems: updated };
+    }
+    case "REMOVE_ITEM":
+      return {
+        ...state,
+        returnItems: state.returnItems.filter((_, i) => i !== action.index),
+      };
+    default:
+      return state;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                   Page                                     */
+/* -------------------------------------------------------------------------- */
+
+export default function ReturnsPage() {
+  const { showToast } = useToast();
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const {
+    transactions,
+    selectedTransaction,
+    returnItems,
+    returnReason,
+    loading,
+    submitting,
+    error,
+  } = state;
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [step, setStep] = useState(STEPS.SELECT_INVOICE);
+  const [dateRange, setDateRange] = useState(15);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  /* -------------------------------------------------------------------------- */
+  /*                              Fetch Transactions                            */
+  /* -------------------------------------------------------------------------- */
+
+  const fetchTransactions = useCallback(
+    async (days = dateRange) => {
+      try {
+        dispatch({ type: "SET_LOADING", payload: true });
+
+        // ✅ Use Cookies.get to match verifyToken() expectation
+        const token = Cookies.get("token");
+      
+
+        const res = await fetch(
+          `/api/transactions?type=sale&days=${days}&showReturned=false`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            cache: "no-store",
+          }
+        );
+
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.message || errorData.error || "فشل جلب البيانات");
+        }
+
+        const data = await res.json();
+
+        if (data.success && Array.isArray(data.transactions)) {
+          // ✅ Filter out already returned orders (matching backend isReturned field)
+          dispatch({
+            type: "SET_TRANSACTIONS",
+            payload: data.transactions.filter((t) => !t.isReturned),
+          });
+        } else {
+          throw new Error(data.message || data.error || "تنسيق البيانات غير صحيح");
+        }
+      } catch (error) {
+        console.error("FETCH_ERROR:", error);
+        dispatch({ type: "SET_ERROR", payload: error.message });
+        showToast(error.message || "فشل جلب فواتير البيع", "error");
+      } finally {
+        dispatch({ type: "SET_LOADING", payload: false });
+      }
+    },
+    [dateRange, showToast]
+  );
+
+  useEffect(() => {
+    fetchTransactions();
+  }, [fetchTransactions]);
+
+  /* -------------------------------------------------------------------------- */
+  /*                               Derived State                                */
+  /* -------------------------------------------------------------------------- */
+
+  const filteredTransactions = useMemo(() => {
+    if (!searchQuery.trim()) return transactions;
+    const query = searchQuery.toLowerCase();
+    return transactions.filter(
+      (t) =>
+        t.invoiceNumber?.toLowerCase().includes(query) ||
+        t.customerName?.toLowerCase().includes(query) ||
+        t.items?.some((item) => item.name?.toLowerCase().includes(query))
+    );
+  }, [transactions, searchQuery]);
+
+  const totalReturnAmount = useMemo(() => {
+    return returnItems.reduce((sum, item) => sum + item.total, 0);
+  }, [returnItems]);
+
+  const returnItemsMap = useMemo(() => {
+    const map = new Map();
+    returnItems.forEach((item, index) => {
+      map.set(`${item.productId}-${item.unit}`, { item, index });
+    });
+    return map;
+  }, [returnItems]);
+
+  const canProceedToConfirm = useMemo(() => {
+    return returnItems.length > 0 && returnReason.trim().length >= 3;
+  }, [returnItems, returnReason]);
+
+  /* -------------------------------------------------------------------------- */
+  /*                                 Actions                                    */
+  /* -------------------------------------------------------------------------- */
+
+  const addItemToReturn = useCallback((item) => {
+    if (item.quantity <= 0) return;
+    dispatch({
+      type: "ADD_ITEM",
+      payload: {
+        // ✅ Ensure productId matches Supabase products.id or batches.product_id
+        productId: item.productId || item.id || item.product_id,
+        name: item.name,
+        unit: item.unit || "piece",
+        price: parseFloat(item.price) || 0,
+        maxQuantity: parseInt(item.quantity) || 0,
+        originalItemId: item.id || item._id,
+      },
+    });
+  }, []);
+
+  const updateQuantity = useCallback((index, quantity) => {
+    dispatch({ type: "UPDATE_QUANTITY", index, quantity });
+  }, []);
+
+  const removeItem = useCallback((index) => {
+    dispatch({ type: "REMOVE_ITEM", index });
+  }, []);
+
+  const resetReturn = useCallback(() => {
+    dispatch({ type: "RESET" });
+    setStep(STEPS.SELECT_INVOICE);
+    setSearchQuery("");
+    setShowConfirmModal(false);
+  }, []);
+
+  const handleSelectTransaction = useCallback(
+    (transaction) => {
+      if (transaction.isReturned) {
+        showToast("هذه الفاتورة تم إرجاعها مسبقاً", "warning");
+        return;
+      }
+      dispatch({ type: "SET_SELECTED_TRANSACTION", payload: transaction });
+      setStep(STEPS.SELECT_PRODUCTS);
+    },
+    [showToast]
+  );
+
+  const submitReturn = useCallback(async () => {
+    if (!returnItems.length) {
+      showToast("اختر منتجات أولاً", "warning");
+      return;
+    }
+    if (!returnReason.trim() || returnReason.trim().length < 3) {
+      showToast("اكتب سبب المرتجع (3 أحرف على الأقل)", "warning");
+      return;
+    }
+    // ✅ Backend expects _id or id from Supabase orders table
+    if (!selectedTransaction?._id && !selectedTransaction?.id) {
+      showToast("بيانات الفاتورة غير صحيحة", "error");
+      return;
+    }
+    setShowConfirmModal(true);
+  }, [returnItems, returnReason, selectedTransaction, showToast]);
+
+  const confirmAndSubmit = useCallback(async () => {
+    setShowConfirmModal(false);
+    try {
+      dispatch({ type: "SET_SUBMITTING", payload: true });
+
+      const token = Cookies.get("token");
+    //  if (!token) throw new Error("انتهت الجلسة، يرجى تسجيل الدخول");
+
+      // ✅ Format payload to EXACTLY match backend expectations
+      const itemsPayload = returnItems.map((item) => ({
+        productId: item.productId, // ✅ Must match products.id in Supabase
+        name: item.name,
+        unit: item.unit,
+        quantity: parseInt(item.quantity), // ✅ Backend expects integer
+        price: parseFloat(item.price), // ✅ Backend expects float
+      }));
+console.log(`token is  `,token);
+
+      const res = await fetch("/api/returns", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          originalInvoiceNumber: selectedTransaction.invoiceNumber,
+          // ✅ Backend uses originalTransactionId to query orders.id
+          originalTransactionId: selectedTransaction._id || selectedTransaction.id,
+          items: itemsPayload,
+          reason: returnReason.trim(),
+        }),
+      });
+
+      const data = await res.json();
+
+      // ✅ Handle both success formats: {success, message} or {success, error}
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || data.error || "حدث خطأ غير متوقع");
+      }
+
+      showToast("تم تنفيذ المرتجع بنجاح ✓", "success");
+      resetReturn();
+      fetchTransactions(); // ✅ Refresh to reflect updated isReturned status
+    } catch (error) {
+      console.error("SUBMIT_ERROR:", error);
+      dispatch({ type: "SET_ERROR", payload: error.message });
+
+      if (error.message.includes("Unauthorized")) {
+        showToast("انتهت الجلسة، يرجى تسجيل الدخول", "error");
+      } else if (error.message.includes("الفاتورة غير موجودة")) {
+        showToast("الفاتورة غير موجودة أو تم حذفها", "error");
+        resetReturn();
+        fetchTransactions();
+      } else {
+        showToast(error.message || "فشل تنفيذ المرتجع", "error");
+      }
+    } finally {
+      dispatch({ type: "SET_SUBMITTING", payload: false });
+    }
+  }, [
+    returnItems,
+    returnReason,
+    selectedTransaction,
+    showToast,
+    fetchTransactions,
+    resetReturn,
+  ]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && showConfirmModal) {
+        setShowConfirmModal(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showConfirmModal]);
+
+  /* -------------------------------------------------------------------------- */
+  /*                                    UI                                      */
+  /* -------------------------------------------------------------------------- */
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-4 dark:from-slate-950 dark:via-slate-900 dark:to-black md:p-8">
+      <div className="mx-auto max-w-7xl">
+        {/* Header */}
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8 flex flex-col gap-5 md:flex-row md:items-center md:justify-between"
+        >
+          <div className="flex items-center gap-4">
+            <div className="rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 p-4 shadow-xl shadow-red-500/20">
+              <RotateCcw className="h-8 w-8 text-white" />
+            </div>
+            <div>
+              <h1 className="text-4xl font-black text-slate-800 dark:text-white">
+                مرتجع المبيعات
+              </h1>
+              <p className="mt-1 flex items-center gap-2 text-slate-500">
+                <Clock className="h-4 w-4" />
+                آخر {dateRange} يوم
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <select
+              value={dateRange}
+              onChange={(e) => {
+                const days = Number(e.target.value);
+                setDateRange(days);
+                fetchTransactions(days);
+              }}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 font-bold dark:border-slate-700 dark:bg-slate-800"
+            >
+              <option value={7}>آخر 7 أيام</option>
+              <option value={15}>آخر 15 يوم</option>
+              <option value={30}>آخر 30 يوم</option>
+            </select>
+            <button
+              onClick={() => fetchTransactions()}
+              disabled={loading}
+              className="rounded-xl border border-slate-200 bg-white p-3 transition hover:scale-105 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800"
+            >
+              <RefreshCw className={`h-5 w-5 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        </motion.div>
+
+        {/* Steps Indicator */}
+        <div className="mb-8 flex items-center justify-center gap-2">
+          {[1, 2, 3].map((s) => (
+            <React.Fragment key={s}>
+              <motion.div
+                className={`flex h-10 w-10 items-center justify-center rounded-full font-black transition-all ${
+                  step >= s
+                    ? "scale-110 bg-gradient-to-br from-red-500 to-rose-600 text-white"
+                    : "bg-slate-200 text-slate-400 dark:bg-slate-700"
+                }`}
+                whileHover={{ scale: step >= s ? 1.1 : 1 }}
+              >
+                {step > s ? <CheckCircle2 className="h-5 w-5" /> : s}
+              </motion.div>
+              {s < 3 && <ChevronLeft className="text-slate-300" />}
+            </React.Fragment>
+          ))}
+        </div>
+
+        {/* Error Banner */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700 dark:border-red-900 dark:bg-red-900/20 dark:text-red-400"
+            >
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 shrink-0" />
+                <p className="font-bold">{error}</p>
+                <button
+                  onClick={() => dispatch({ type: "SET_ERROR", payload: null })}
+                  className="mr-auto rounded-lg p-1 hover:bg-red-100 dark:hover:bg-red-900/40"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+          {/* Left Column - Transactions List */}
+          <div className="space-y-6 lg:col-span-7">
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="بحث برقم الفاتورة، اسم العميل، أو المنتج..."
+                className="w-full rounded-2xl border border-slate-200 bg-white p-4 pr-12 font-bold outline-none focus:ring-2 focus:ring-red-500/20 dark:border-slate-700 dark:bg-slate-800"
+              />
+            </div>
+
+            {/* Transactions List */}
+            {loading ? (
+              <div className="flex justify-center py-20">
+                <div className="h-12 w-12 animate-spin rounded-full border-4 border-red-500/20 border-t-red-500" />
+              </div>
+            ) : !filteredTransactions.length ? (
+              <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-white/50 py-20 text-center dark:border-slate-700 dark:bg-slate-800/50">
+                <Receipt className="mx-auto mb-4 h-16 w-16 text-slate-300" />
+                <p className="font-bold text-slate-500">
+                  {searchQuery ? "لا توجد نتائج للبحث" : "لا توجد فواتير للبيع"}
+                </p>
+                <p className="mt-2 text-sm text-slate-400">
+                  {searchQuery ? "جرب كلمات بحث أخرى" : "جميع الفواتير تمت معالجتها"}
+                </p>
+              </div>
+            ) : (
+              <div className="max-h-[650px] space-y-4 overflow-y-auto pr-2">
+                {filteredTransactions.map((transaction) => (
+                  <motion.div
+                    key={transaction._id || transaction.id}
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => handleSelectTransaction(transaction)}
+                    className={`cursor-pointer rounded-2xl border-2 bg-white p-6 shadow-lg transition-all dark:bg-slate-800 ${
+                      selectedTransaction?._id === transaction._id ||
+                      selectedTransaction?.id === transaction.id
+                        ? "border-red-500 ring-2 ring-red-500/20"
+                        : "border-slate-200 hover:border-red-300 dark:border-slate-700"
+                    } ${transaction.isReturned ? "opacity-50 cursor-not-allowed" : ""}`}
+                  >
+                    <div className="mb-4 flex items-start justify-between">
+                      <div>
+                        <h3 className="text-xl font-black text-slate-800 dark:text-white">
+                          #{transaction.invoiceNumber}
+                        </h3>
+                        <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-4 w-4" />
+                            {new Date(transaction.date).toLocaleDateString("ar-EG")}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <TrendingUp className="h-4 w-4" />
+                            {transaction.totalAmount?.toLocaleString() || 0} ج.م
+                          </span>
+                          {transaction.customerName && (
+                            <span className="flex items-center gap-1">
+                              <Package className="h-4 w-4" />
+                              {transaction.customerName}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {transaction.isReturned ? (
+                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500 dark:bg-slate-700">
+                            تم الإرجاع
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-black text-green-600">
+                            {transaction.items?.length || 0} منتج
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {transaction.items?.slice(0, 3).map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-sm">
+                          <span className="font-bold truncate">{item.name}</span>
+                          <span className="text-slate-500">
+                            {item.quantity} {item.unit}
+                          </span>
+                        </div>
+                      ))}
+                      {(transaction.items?.length || 0) > 3 && (
+                        <p className="text-xs text-slate-400">
+                          +{(transaction.items?.length || 0) - 3} منتجات أخرى
+                        </p>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Right Column - Return Cart */}
+          <div className="lg:col-span-5">
+            <div className="sticky top-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-800">
+              {/* Header */}
+              <div className="bg-gradient-to-br from-red-500 to-rose-600 p-6 text-white">
+                <h3 className="flex items-center gap-2 text-xl font-black">
+                  <Package className="h-6 w-6" />
+                  سلة المرتجع
+                </h3>
+                {selectedTransaction && (
+                  <p className="mt-1 text-sm opacity-90">
+                    فاتورة #{selectedTransaction.invoiceNumber}
+                  </p>
+                )}
+              </div>
+
+              {/* Selected Invoice Info */}
+              {selectedTransaction && (
+                <div className="border-b border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-700/50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-black">#{selectedTransaction.invoiceNumber}</p>
+                      <p className="text-xs text-slate-500">
+                        {new Date(selectedTransaction.date).toLocaleDateString("ar-EG")}
+                      </p>
+                    </div>
+                    <button
+                      onClick={resetReturn}
+                      className="rounded-xl p-2 transition hover:bg-red-100 dark:hover:bg-red-500/20"
+                      title="إلغاء الاختيار"
+                    >
+                      <X className="h-4 w-4 text-red-500" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 2: Select Products */}
+              {step === STEPS.SELECT_PRODUCTS && selectedTransaction && (
+                <div className="max-h-[500px] space-y-3 overflow-y-auto p-6">
+                  {selectedTransaction.items?.map((item, idx) => {
+                    const key = `${item.productId || item.id}-${item.unit}`;
+                    const existing = returnItemsMap.get(key);
+                    return (
+                      <motion.div
+                        key={idx}
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-600 dark:bg-slate-700/50"
+                      >
+                        <div className="mb-3 flex items-start justify-between">
+                          <div>
+                            <p className="font-black text-slate-800 dark:text-white">
+                              {item.name}
+                            </p>
+                            <p className="text-sm text-slate-500">
+                              {parseFloat(item.price).toLocaleString()} ج.م
+                            </p>
+                          </div>
+                          <span className="text-sm font-bold text-slate-500">
+                            متاح: {item.quantity}
+                          </span>
+                        </div>
+                        {existing ? (
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() =>
+                                  updateQuantity(existing.index, existing.item.quantity - 1)
+                                }
+                                className="rounded-lg border border-slate-200 bg-white p-2 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800"
+                              >
+                                <Minus className="h-4 w-4" />
+                              </button>
+                              <span className="w-10 text-center font-black">
+                                {existing.item.quantity}
+                              </span>
+                              <button
+                                onClick={() =>
+                                  updateQuantity(existing.index, existing.item.quantity + 1)
+                                }
+                                className="rounded-lg border border-slate-200 bg-white p-2 transition hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800"
+                              >
+                                <Plus className="h-4 w-4" />
+                              </button>
+                            </div>
+                            <button
+                              onClick={() => removeItem(existing.index)}
+                              className="rounded-lg p-2 text-red-500 transition hover:bg-red-50 dark:hover:bg-red-500/20"
+                              title="إزالة"
+                            >
+                              <X className="h-5 w-5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => addItemToReturn(item)}
+                            disabled={item.quantity <= 0}
+                            className="w-full rounded-xl bg-gradient-to-r from-red-500 to-rose-600 py-3 font-black text-white transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            إضافة للمرتجع
+                          </button>
+                        )}
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Step 3: Confirm */}
+              {step === STEPS.CONFIRM && (
+                <div className="space-y-4 p-6">
+                  {returnItems.map((item, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-sm">
+                      <span className="font-bold">{item.name}</span>
+                      <span className="font-black text-red-500">
+                        {item.total.toLocaleString()} ج.م
+                      </span>
+                    </div>
+                  ))}
+                  <div>
+                    <label className="mb-2 block text-sm font-bold text-slate-700 dark:text-slate-300">
+                      سبب المرتجع *
+                    </label>
+                    <textarea
+                      value={returnReason}
+                      onChange={(e) =>
+                        dispatch({ type: "SET_RETURN_REASON", payload: e.target.value })
+                      }
+                      placeholder="اكتب سبب الإرجاع..."
+                      rows={4}
+                      maxLength={200}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 outline-none focus:ring-2 focus:ring-red-500/20 dark:border-slate-600 dark:bg-slate-700"
+                    />
+                    <p className="mt-1 text-xs text-slate-400 text-left">
+                      {returnReason.length}/200
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-500/20 dark:bg-amber-500/10">
+                    <div className="flex gap-3">
+                      <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+                      <p className="text-sm text-amber-700 dark:text-amber-400">
+                        لا يمكن التراجع عن عملية المرتجع بعد التأكيد.
+                        سيتم خصم المبلغ من الرصيد وتحديث المخزون.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-slate-200 pt-4 dark:border-slate-700">
+                    <span className="font-bold">الإجمالي</span>
+                    <span className="text-2xl font-black text-red-500">
+                      {totalReturnAmount.toLocaleString()} ج.م
+                    </span>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setStep(STEPS.SELECT_PRODUCTS)}
+                      className="flex-1 rounded-xl border-2 border-slate-200 py-3 font-black transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50"
+                    >
+                      رجوع
+                    </button>
+                    <button
+                      disabled={submitting || !canProceedToConfirm}
+                      onClick={submitReturn}
+                      className="flex-1 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 py-3 font-black text-white transition hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {submitting ? "جاري المعالجة..." : "تأكيد المرتجع"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {!selectedTransaction && (
+                <div className="p-12 text-center">
+                  <Package className="mx-auto mb-4 h-16 w-16 text-slate-300" />
+                  <p className="font-bold text-slate-500">اختر فاتورة للبدء</p>
+                  <p className="mt-2 text-sm text-slate-400">
+                    اختر من القائمة على اليسار فاتورة تريد إرجاع منتجات منها
+                  </p>
+                </div>
+              )}
+
+              {/* Continue Button */}
+              {step === STEPS.SELECT_PRODUCTS && returnItems.length > 0 && (
+                <div className="p-6 pt-0">
+                  <button
+                    onClick={() => setStep(STEPS.CONFIRM)}
+                    className="w-full rounded-xl bg-gradient-to-r from-red-500 to-rose-600 py-4 font-black text-white transition hover:scale-[1.02]"
+                  >
+                    متابعة ({returnItems.length} منتج)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {showConfirmModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => setShowConfirmModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-6 text-center">
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+                  <AlertCircle className="h-8 w-8 text-red-500" />
+                </div>
+                <h3 className="text-xl font-black text-slate-800 dark:text-white">
+                  تأكيد عملية المرتجع
+                </h3>
+                <p className="mt-2 text-slate-500">
+                  هل أنت متأكد من إرجاع {returnItems.length} منتج بقيمة{" "}
+                  <span className="font-black text-red-500">
+                    {totalReturnAmount.toLocaleString()} ج.م
+                  </span>
+                  ؟
+                </p>
+              </div>
+              <div className="space-y-3">
+                <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-700/50">
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                    الفاتورة: #{selectedTransaction?.invoiceNumber}
+                  </p>
+                  <p className="text-sm text-slate-500">
+                    السبب: {returnReason || "بدون سبب"}
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowConfirmModal(false)}
+                    disabled={submitting}
+                    className="flex-1 rounded-xl border-2 border-slate-200 py-3 font-black transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    onClick={confirmAndSubmit}
+                    disabled={submitting}
+                    className="flex-1 rounded-xl bg-gradient-to-r from-red-500 to-rose-600 py-3 font-black text-white transition hover:scale-[1.02] disabled:opacity-50"
+                  >
+                    {submitting ? "جاري..." : "نعم، تأكيد"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
