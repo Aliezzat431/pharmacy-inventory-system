@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
@@ -218,10 +217,7 @@ const Stock = () => {
 
   /* fetch batches */
 
-  const fetchBatches = async (
-    query = "",
-    mode = "all"
-  ) => {
+  const fetchBatches = async (query = "", mode = "all") => {
     try {
       const token = Cookies.get("token");
 
@@ -230,15 +226,12 @@ const Stock = () => {
           ...(query && { q: query }),
           mode,
         },
-
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
-      const products = safeArray(
-        response.data?.products
-      );
+      const products = safeArray(response.data?.products);
 
       const batchesList = products.map((batch) => ({
         ...batch,
@@ -328,12 +321,8 @@ const Stock = () => {
   const updateBatchState = (batchId, changes) => {
     setBatches((prev) =>
       safeArray(prev).map((batch) =>
-        batch.batchId?.toString() ===
-        batchId?.toString()
-          ? {
-              ...batch,
-              ...changes,
-            }
+        batch.batchId?.toString() === batchId?.toString()
+          ? { ...batch, ...changes }
           : batch
       )
     );
@@ -343,11 +332,8 @@ const Stock = () => {
     setExpandedProducts((prev) => {
       const newSet = new Set(prev);
 
-      if (newSet.has(productId)) {
-        newSet.delete(productId);
-      } else {
-        newSet.add(productId);
-      }
+      if (newSet.has(productId)) newSet.delete(productId);
+      else newSet.add(productId);
 
       return newSet;
     });
@@ -358,7 +344,6 @@ const Stock = () => {
 
     try {
       const token = Cookies.get("token");
-
       const { productId, batchId } = deleteId;
 
       const url = batchId
@@ -366,19 +351,14 @@ const Stock = () => {
         : `/api/products?id=${productId}`;
 
       await axios.delete(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       toast.success("تم الحذف بنجاح");
-
       fetchBatches(searchTerm, searchMode);
-
       setDeleteId(null);
     } catch (err) {
       console.error(err);
-
       toast.error("فشل الحذف");
     }
   };
@@ -386,80 +366,46 @@ const Stock = () => {
   /* stats */
 
   const totalProducts = safeArray(groupedProducts).length;
-
   const totalBatches = safeArray(batches).length;
 
-  const totalQty = safeArray(batches).reduce(
-    (s, p) => s + (Number(p.quantity) || 0),
-    0
-  );
-
   const expiringSoon = safeArray(batches).filter((p) =>
-    ["critical", "warning"].includes(
-      getExpiryStatus(p.expiryDate)
-    )
+    ["critical", "warning"].includes(getExpiryStatus(p.expiryDate))
   ).length;
 
   const lowStock = safeArray(batches).filter(
-    (p) =>
-      Number(p.quantity) > 0 &&
-      Number(p.quantity) <= 10
+    (p) => Number(p.quantity) > 0 && Number(p.quantity) <= 10
   ).length;
 
   return (
-    <div
-      className="p-4 md:p-8 w-full min-h-screen flex flex-col gap-5"
-      dir="rtl"
-    >
-      {/* search */}
+    <div className="p-4 md:p-8 w-full min-h-screen flex flex-col gap-5" dir="rtl">
 
+      {/* search */}
       <div className="flex gap-3">
         <div className="relative flex-1">
-          <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
-
+          <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4" />
           <Input
             value={searchTerm}
-            onChange={(e) =>
-              setSearchTerm(e.target.value)
-            }
+            onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="ابحث..."
             className="pr-10"
           />
         </div>
 
-        <Button
-          onClick={() => {
-            setEditingStockProduct(null);
-            setOpenModal(true);
-          }}
-        >
+        <Button onClick={() => { setEditingStockProduct(null); setOpenModal(true); }}>
           <Plus className="h-4 w-4 ml-2" />
           منتج جديد
         </Button>
       </div>
 
       {/* stats */}
-
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-xl border">
-          المنتجات: {totalProducts}
-        </div>
-
-        <div className="p-4 rounded-xl border">
-          الدفعات: {totalBatches}
-        </div>
-
-        <div className="p-4 rounded-xl border">
-          تنتهي قريباً: {expiringSoon}
-        </div>
-
-        <div className="p-4 rounded-xl border">
-          مخزون منخفض: {lowStock}
-        </div>
+        <div className="p-4 border rounded-xl">المنتجات: {totalProducts}</div>
+        <div className="p-4 border rounded-xl">الدفعات: {totalBatches}</div>
+        <div className="p-4 border rounded-xl">تنتهي قريباً: {expiringSoon}</div>
+        <div className="p-4 border rounded-xl">مخزون منخفض: {lowStock}</div>
       </div>
 
       {/* table */}
-
       <div className="border rounded-2xl overflow-hidden">
         <Table>
           <TableHeader>
@@ -472,272 +418,123 @@ const Stock = () => {
           </TableHeader>
 
           <TableBody>
-            {safeArray(groupedProducts).length === 0 ? (
+            {groupedProducts.length === 0 ? (
               <TableRow>
-                <TableCell
-                  colSpan={4}
-                  className="text-center py-10"
-                >
+                <TableCell colSpan={4} className="text-center py-10">
                   لا توجد منتجات
                 </TableCell>
               </TableRow>
             ) : (
-              safeArray(groupedProducts).map(
-                (product, idx) => {
-                  const isExpanded =
-                    expandedProducts.has(
-                      product.productId
-                    );
+              groupedProducts.map((product) => {
+                const isExpanded = expandedProducts.has(product.productId);
 
-                  return (
-                    <React.Fragment
-                      key={product.productId}
-                    >
-                      <TableRow
-                        className="cursor-pointer"
-                        onClick={() =>
-                          toggleProduct(
-                            product.productId
-                          )
-                        }
-                      >
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {isExpanded ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
+                return (
+                  <React.Fragment key={product.productId}>
+                    <TableRow onClick={() => toggleProduct(product.productId)} className="cursor-pointer">
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          {isExpanded ? <ChevronDown /> : <ChevronRight />}
+                          {product.name}
+                        </div>
+                      </TableCell>
 
-                            <span>
-                              {product.name}
-                            </span>
-                          </div>
-                        </TableCell>
+                      <TableCell>{product.totalQuantity}</TableCell>
+                      <TableCell>{product.lowestPrice}</TableCell>
 
-                        <TableCell>
-                          {product.totalQuantity}
-                        </TableCell>
+                      <TableCell>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteId({ productId: product.productId });
+                          }}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
 
-                        <TableCell>
-                          {product.lowestPrice}
-                        </TableCell>
+                    {isExpanded &&
+                      product.batches.map((batch) => (
+                        <TableRow key={batch.batchId}>
+                          <TableCell className="pr-10">دفعة</TableCell>
 
-                        <TableCell>
-                          <div className="flex gap-2">
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={(e) => {
-                                e.stopPropagation();
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={batch.quantity || ""}
+                              onChange={(e) =>
+                                updateBatchState(batch.batchId, {
+                                  quantity: e.target.value,
+                                })
+                              }
+                            />
+                          </TableCell>
 
-                                setDeleteId({
-                                  productId:
-                                    product.productId,
-                                });
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={batch.price || ""}
+                              onChange={(e) =>
+                                updateBatchState(batch.batchId, {
+                                  price: e.target.value,
+                                })
+                              }
+                            />
+                          </TableCell>
 
-                      {isExpanded &&
-                        safeArray(
-                          product.batches
-                        ).map((batch, bIdx) => (
-                          <TableRow
-                            key={batch.batchId}
-                          >
-                            <TableCell>
-                              <div className="mr-6 flex items-center gap-2">
-                                <Layers className="h-4 w-4" />
-
-                                دفعة #{bIdx + 1}
-                              </div>
-                            </TableCell>
-
-                            <TableCell>
-                              <Input
-                                type="number"
-                                value={
-                                  batch.quantity || ""
-                                }
-                                onChange={(e) =>
-                                  updateBatchState(
-                                    batch.batchId,
-                                    {
-                                      quantity:
-                                        e.target.value,
-                                    }
-                                  )
-                                }
-                                className="w-24"
-                              />
-                            </TableCell>
-
-                            <TableCell>
-                              <Input
-                                type="number"
-                                value={
-                                  batch.price || ""
-                                }
-                                onChange={(e) =>
-                                  updateBatchState(
-                                    batch.batchId,
-                                    {
-                                      price:
-                                        e.target.value,
-                                    }
-                                  )
-                                }
-                                className="w-24"
-                              />
-                            </TableCell>
-
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                >
-                                  <Save className="h-4 w-4" />
-                                </Button>
-
-                                <ExpiryBadge
-                                  expiryDate={
-                                    batch.expiryDate
-                                  }
-                                />
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                    </React.Fragment>
-                  );
-                }
-              )
+                          <TableCell>
+                            <ExpiryBadge expiryDate={batch.expiryDate} />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </React.Fragment>
+                );
+              })
             )}
           </TableBody>
         </Table>
       </div>
 
-      {/* suppliers */}
-
-      <div className="max-w-sm">
-        <Select
-          value={invoiceDetails.supplier}
-          onValueChange={(val) =>
-            setInvoiceDetails((prev) => ({
-              ...prev,
-              supplier: val,
-            }))
-          }
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="اختيار المورد" />
-          </SelectTrigger>
-
-          <SelectContent>
-            {safeArray(suppliers).map((s, i) => (
-              <SelectItem
-                key={`${s}-${i}`}
-                value={String(s)}
-              >
-                {String(s)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       {/* delete dialog */}
-
-      <Dialog
-        open={!!deleteId}
-        onOpenChange={(val) =>
-          !val && setDeleteId(null)
-        }
-      >
+      <Dialog open={!!deleteId} onOpenChange={(v) => !v && setDeleteId(null)}>
         <DialogContent>
           <div className="flex flex-col items-center gap-4">
-            <AlertTriangle className="h-10 w-10 text-red-500" />
-
-            <h2 className="font-bold">
-              تأكيد الحذف
-            </h2>
+            <AlertTriangle className="text-red-500" />
+            <h2>تأكيد الحذف</h2>
 
             <div className="flex gap-3">
-              <Button
-                variant="destructive"
-                onClick={handleDelete}
-              >
-                حذف
-              </Button>
-
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setDeleteId(null)
-                }
-              >
-                إلغاء
-              </Button>
+              <Button variant="destructive" onClick={handleDelete}>حذف</Button>
+              <Button variant="outline" onClick={() => setDeleteId(null)}>إلغاء</Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* modals */}
-
       <CreateProductForm
         openModal={openModal}
         setOpenModal={setOpenModal}
-        editingStockProduct={
-          editingStockProduct
-        }
-        setEditingStockProduct={
-          setEditingStockProduct
-        }
-        onSuccess={() =>
-          fetchBatches(
-            searchTerm,
-            searchMode
-          )
-        }
+        editingStockProduct={editingStockProduct}
+        setEditingStockProduct={setEditingStockProduct}
+        onSuccess={() => fetchBatches(searchTerm, searchMode)}
       />
 
       <BarcodeScanner
         onScan={(barcode) => {
           setSearchTerm(barcode);
-
-          fetchBatches(
-            barcode,
-            searchMode
-          );
+          fetchBatches(barcode, searchMode);
         }}
       />
 
       {batchEntryTarget && (
         <BatchEntryDialog
           open={!!batchEntryTarget}
-          onClose={() =>
-            setBatchEntryTarget(null)
-          }
-          productName={
-            batchEntryTarget.name
-          }
-          productId={
-            batchEntryTarget.productId
-          }
+          onClose={() => setBatchEntryTarget(null)}
+          productName={batchEntryTarget.name}
+          productId={batchEntryTarget.productId}
           suppliers={safeArray(suppliers)}
-          onSuccess={() =>
-            fetchBatches(
-              searchTerm,
-              searchMode
-            )
-          }
+          onSuccess={() => fetchBatches(searchTerm, searchMode)}
         />
       )}
     </div>
