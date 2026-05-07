@@ -2,166 +2,191 @@ import { NextResponse } from "next/server";
 import { supabase } from "@/app/lib/supabase";
 import { verifyToken } from "@/app/lib/verifyToken";
 
-// GET all companies
+// =======================
+// RESPONSE HELPERS
+// =======================
+const ok = (data) =>
+  NextResponse.json({
+    success: true,
+    data,
+  });
+
+const fail = (error, status = 500, details = null, code = null) =>
+  NextResponse.json(
+    {
+      success: false,
+      error,
+      details,
+      code,
+    },
+    { status }
+  );
+
+// =======================
+// GET ALL COMPANIES
+// =======================
 export async function GET(req) {
   try {
     const user = await verifyToken(req.headers);
-    if (!user)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { data: companies, error } = await supabase
-      .from('companies')
-      .select('*')
-      .order('name', { ascending: true });
+    if (!user) {
+      return fail("Unauthorized", 401);
+    }
 
-    if (error) throw error;
-    
-    return NextResponse.json(companies.map(c => ({
+    const { data, error } = await supabase
+      .from("companies")
+      .select("*")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("GET companies error:", error);
+      return fail("Supabase error", 500, error.message, error.code);
+    }
+
+    const formatted = (data || []).map((c) => ({
       _id: c.id,
       id: c.id,
       name: c.name,
-      createdAt: c.created_at
-    })));
+      createdAt: c.created_at,
+    }));
+
+    return ok(formatted);
   } catch (error) {
-    console.error("GET companies error:", error);
-    return NextResponse.json(
-      { error: "فشل في جلب الشركات" },
-      { status: 500 }
-    );
+    console.error("GET CATCH ERROR:", error);
+    return fail("فشل في جلب الشركات", 500, error.message);
   }
 }
 
-// POST create company
+// =======================
+// CREATE COMPANY
+// =======================
 export async function POST(req) {
   try {
     const user = await verifyToken(req.headers);
-    if (!user)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    if (!user) {
+      return fail("Unauthorized", 401);
+    }
 
     const body = await req.json();
     const name = body?.name?.trim();
 
     if (!name || name.length < 3) {
-      return NextResponse.json(
-        { error: "اسم الشركة غير صالح. يجب أن يكون نصاً لا يقل عن 3 أحرف." },
-        { status: 400 }
-      );
+      return fail("اسم الشركة غير صالح", 400);
     }
 
-    // 1. Basic Exact Match Check
-    const { data: existingExact, error: findError } = await supabase
-      .from('companies')
-      .select('name')
-      .ilike('name', name)
-      .single();
+    // check duplicate
+    const { data: existing } = await supabase
+      .from("companies")
+      .select("id")
+      .ilike("name", name)
+      .maybeSingle();
 
-    if (existingExact) {
-      return NextResponse.json(
-        { error: "الاسم موجود بالفعل." },
-        { status: 409 }
-      );
+    if (existing) {
+      return fail("الاسم موجود بالفعل", 409);
     }
 
-    // 2. AI Smart Check
-    const { data: allCompanies, error: allErr } = await supabase
-      .from('companies')
-      .select('name');
-    
-    const existingNames = allCompanies ? allCompanies.map(c => c.name) : [];
-
-    if (existingNames.length > 0) {
-      const { validateCompanyName } = await import("@/app/lib/ai/company-validator");
-      const validation = await validateCompanyName(name, existingNames);
-
-      if (validation && validation.isDuplicate) {
-        return NextResponse.json(
-          {
-            error: `يبدو أن هذه الشركة موجودة بالفعل باسم "${validation.existingName}".`,
-            suggestion: validation.existingName
-          },
-          { status: 409 }
-        );
-      }
-    }
-
-    const { data: newCompany, error: createError } = await supabase
-      .from('companies')
+    const { data, error } = await supabase
+      .from("companies")
       .insert({ name })
       .select()
       .single();
 
-    if (createError) throw createError;
-
-    return NextResponse.json({ id: newCompany.id, _id: newCompany.id, name: newCompany.name });
-  } catch (error) {
-    console.error("POST companies error:", error);
-
-    // duplicate name error (postgres fallback)
-    if (error?.code === '23505') {
-      return NextResponse.json(
-        { error: "الاسم موجود بالفعل." },
-        { status: 409 }
-      );
+    if (error) {
+      console.error("INSERT ERROR:", error);
+      return fail("فشل في إنشاء الشركة", 500, error.message, error.code);
     }
 
-    return NextResponse.json(
-      { error: "فشل في إنشاء الشركة" },
-      { status: 500 }
-    );
+    return ok({
+      _id: data.id,
+      id: data.id,
+      name: data.name,
+    });
+  } catch (error) {
+    console.error("POST CATCH ERROR:", error);
+    return fail("فشل في إنشاء الشركة", 500, error.message);
   }
 }
 
-// PATCH update company
+// =======================
+// UPDATE COMPANY
+// =======================
 export async function PATCH(req) {
   try {
     const user = await verifyToken(req.headers);
-    if (!user)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const body = await req.json();
-    const { id, name } = body;
+    if (!user) {
+      return fail("Unauthorized", 401);
+    }
+
+    const { id, name } = await req.json();
 
     if (!id || !name) {
-      return NextResponse.json(
-        { error: "Missing id or name" },
-        { status: 400 }
-      );
+      return fail("Missing id or name", 400);
     }
 
-    if (typeof name !== "string" || name.trim().length < 3) {
-      return NextResponse.json(
-        { error: "اسم الشركة غير صالح. يجب أن يكون نصاً لا يقل عن 3 أحرف." },
-        { status: 400 }
-      );
-    }
-
-    const { data: updatedCompany, error: updateError } = await supabase
-      .from('companies')
+    const { data, error } = await supabase
+      .from("companies")
       .update({ name: name.trim() })
-      .eq('id', id)
+      .eq("id", id)
       .select()
       .single();
 
-    if (updateError || !updatedCompany) {
-      if (updateError?.code === '23505') {
-        return NextResponse.json(
-          { error: "الاسم موجود بالفعل. الرجاء اختيار اسم آخر." },
-          { status: 409 }
-        );
+    if (error) {
+      if (error.code === "23505") {
+        return fail("الاسم موجود بالفعل", 409);
       }
-      return NextResponse.json({ error: "Not Found or Update Failed" }, { status: 404 });
+
+      console.error("UPDATE ERROR:", error);
+      return fail("فشل في التحديث", 500, error.message, error.code);
     }
 
-    return NextResponse.json({
-      id: updatedCompany.id,
-      _id: updatedCompany.id,
-      name: updatedCompany.name,
+    if (!data) {
+      return fail("Company not found", 404);
+    }
+
+    return ok({
+      _id: data.id,
+      id: data.id,
+      name: data.name,
     });
   } catch (error) {
-    console.error("PATCH companies error:", error);
-    return NextResponse.json(
-      { error: "فشل في تحديث الشركة" },
-      { status: 500 }
-    );
+    console.error("PATCH CATCH ERROR:", error);
+    return fail("فشل في التحديث", 500, error.message);
   }
-} 
+}
+
+// =======================
+// DELETE COMPANY
+// =======================
+export async function DELETE(req) {
+  try {
+    const user = await verifyToken(req.headers);
+
+    if (!user) {
+      return fail("Unauthorized", 401);
+    }
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return fail("Missing id", 400);
+    }
+
+    const { error } = await supabase
+      .from("companies")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("DELETE ERROR:", error);
+      return fail("فشل في الحذف", 500, error.message, error.code);
+    }
+
+    return ok({ id });
+  } catch (error) {
+    console.error("DELETE CATCH ERROR:", error);
+    return fail("فشل في الحذف", 500, error.message);
+  }
+}
