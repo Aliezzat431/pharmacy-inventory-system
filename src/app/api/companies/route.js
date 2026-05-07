@@ -3,8 +3,51 @@ import { supabase } from "@/app/lib/supabase";
 import { verifyToken } from "@/app/lib/verifyToken";
 
 // =========================
-// DEBUG HELPER
+// DEBUG RESPONSE HELPER
 // =========================
+
+function debugResponse(
+  message,
+  error = null,
+  status = 500,
+  extra = {}
+) {
+  console.error("\n========== API ERROR ==========");
+  console.error(message);
+
+  if (error) {
+    console.error(error);
+  }
+
+  console.error("================================\n");
+
+  return NextResponse.json(
+    {
+      success: false,
+      error: message,
+
+      // TEMP DEBUG FOR UI
+      debug: {
+        message: error?.message || null,
+        code: error?.code || null,
+        details: error?.details || null,
+        hint: error?.hint || null,
+        stack:
+          process.env.NODE_ENV === "development"
+            ? error?.stack
+            : null,
+      },
+
+      ...extra,
+    },
+    { status }
+  );
+}
+
+// =========================
+// LOG HELPER
+// =========================
+
 function logStep(step, data = null) {
   console.log(`\n========== ${step} ==========`);
 
@@ -20,219 +63,137 @@ function logStep(step, data = null) {
 }
 
 // =========================
-// GET ALL COMPANIES
+// GET
 // =========================
+
 export async function GET(req) {
   try {
-    logStep("GET /companies START");
+    logStep("GET COMPANIES START");
 
     const user = await verifyToken(req.headers);
 
-    logStep("VERIFY TOKEN RESULT", user);
-
     if (!user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
+      return debugResponse(
+        "Unauthorized",
+        null,
+        401
       );
     }
 
-    const { data: companies, error } = await supabase
+    const {
+      data: companies,
+      error,
+    } = await supabase
       .from("companies")
       .select("*")
       .order("name", { ascending: true });
 
-    logStep("SUPABASE GET RESULT", {
-      companies,
-      error,
-    });
-
     if (error) {
-      console.error("SUPABASE GET ERROR:", error);
-
-      return NextResponse.json(
-        {
-          error: "Supabase GET Error",
-          details: error.message,
-          code: error.code,
-        },
-        { status: 500 }
+      return debugResponse(
+        "Supabase GET Error",
+        error
       );
     }
 
-    const formatted = (companies || []).map((c) => ({
-      _id: c.id,
-      id: c.id,
-      name: c.name,
-      createdAt: c.created_at,
-    }));
-
-    logStep("FORMATTED RESPONSE", formatted);
-
-    return NextResponse.json(formatted);
+    return NextResponse.json({
+      success: true,
+      companies: (companies || []).map((c) => ({
+        _id: c.id,
+        id: c.id,
+        name: c.name,
+        createdAt: c.created_at,
+      })),
+    });
   } catch (error) {
-    console.error("GET companies CATCH ERROR:", error);
-
-    return NextResponse.json(
-      {
-        error: "فشل في جلب الشركات",
-        debug: error.message,
-        stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
-      },
-      { status: 500 }
+    return debugResponse(
+      "GET companies crashed",
+      error
     );
   }
 }
 
 // =========================
-// CREATE COMPANY
+// POST
 // =========================
+
 export async function POST(req) {
   try {
-    logStep("POST /companies START");
+    logStep("POST COMPANIES START");
 
     const user = await verifyToken(req.headers);
 
-    logStep("VERIFY TOKEN RESULT", user);
+    logStep("USER", user);
 
     if (!user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
+      return debugResponse(
+        "Unauthorized",
+        null,
+        401
       );
     }
 
     const body = await req.json();
 
-    logStep("REQUEST BODY", body);
+    logStep("BODY", body);
 
     const name = body?.name?.trim();
 
-    logStep("EXTRACTED NAME", { name });
+    logStep("NAME", name);
 
-    if (!name || name.length < 3) {
-      return NextResponse.json(
-        {
-          error:
-            "اسم الشركة غير صالح. يجب أن يكون نصاً لا يقل عن 3 أحرف.",
-        },
-        { status: 400 }
+    if (!name) {
+      return debugResponse(
+        "الاسم مطلوب",
+        null,
+        400
+      );
+    }
+
+    if (name.length < 3) {
+      return debugResponse(
+        "اسم الشركة قصير جدًا",
+        null,
+        400
       );
     }
 
     // =========================
-    // CHECK EXACT DUPLICATE
+    // CHECK DUPLICATE
     // =========================
 
     const {
-      data: existingExact,
-      error: exactError,
+      data: existing,
+      error: existingError,
     } = await supabase
       .from("companies")
       .select("*")
       .ilike("name", name)
       .maybeSingle();
 
-    logStep("EXACT MATCH CHECK", {
-      existingExact,
-      exactError,
+    logStep("EXISTING COMPANY", {
+      existing,
+      existingError,
     });
 
-    if (exactError) {
-      console.error("EXACT CHECK ERROR:", exactError);
-
-      return NextResponse.json(
-        {
-          error: "Exact match query failed",
-          details: exactError.message,
-          code: exactError.code,
-        },
-        { status: 500 }
+    if (existingError) {
+      return debugResponse(
+        "فشل فحص الاسم",
+        existingError
       );
     }
 
-    if (existingExact) {
-      return NextResponse.json(
+    if (existing) {
+      return debugResponse(
+        "الشركة موجودة بالفعل",
+        null,
+        409,
         {
-          error: "الاسم موجود بالفعل.",
-        },
-        { status: 409 }
-      );
-    }
-
-    // =========================
-    // GET ALL COMPANIES
-    // =========================
-
-    const {
-      data: allCompanies,
-      error: allErr,
-    } = await supabase
-      .from("companies")
-      .select("name");
-
-    logStep("ALL COMPANIES", {
-      allCompanies,
-      allErr,
-    });
-
-    if (allErr) {
-      console.error("ALL COMPANIES ERROR:", allErr);
-
-      return NextResponse.json(
-        {
-          error: "Failed loading companies",
-          details: allErr.message,
-          code: allErr.code,
-        },
-        { status: 500 }
-      );
-    }
-
-    // =========================
-    // AI VALIDATION
-    // =========================
-
-    const existingNames = (allCompanies || []).map((c) => c.name);
-
-    logStep("EXISTING NAMES", existingNames);
-
-    if (existingNames.length > 0) {
-      try {
-        logStep("IMPORTING AI VALIDATOR");
-
-        const { validateCompanyName } = await import(
-          "@/app/lib/ai/company-validator"
-        );
-
-        logStep("RUNNING AI VALIDATION");
-
-        const validation = await validateCompanyName(
-          name,
-          existingNames
-        );
-
-        logStep("AI VALIDATION RESULT", validation);
-
-        if (validation?.isDuplicate) {
-          return NextResponse.json(
-            {
-              error: `يبدو أن هذه الشركة موجودة بالفعل باسم "${validation.existingName}".`,
-              suggestion: validation.existingName,
-            },
-            { status: 409 }
-          );
+          existing,
         }
-      } catch (aiError) {
-        console.error("AI VALIDATION ERROR:", aiError);
-
-        // IMPORTANT:
-        // don't crash request because AI failed
-      }
+      );
     }
 
     // =========================
-    // CREATE COMPANY
+    // INSERT
     // =========================
 
     const {
@@ -252,64 +213,43 @@ export async function POST(req) {
     });
 
     if (createError) {
-      console.error("CREATE ERROR:", createError);
-
-      return NextResponse.json(
-        {
-          error: "Create failed",
-          details: createError.message,
-          code: createError.code,
-        },
-        { status: 500 }
+      return debugResponse(
+        "فشل إنشاء الشركة",
+        createError
       );
     }
 
     return NextResponse.json({
-      id: newCompany.id,
-      _id: newCompany.id,
-      name: newCompany.name,
+      success: true,
+      company: {
+        id: newCompany.id,
+        _id: newCompany.id,
+        name: newCompany.name,
+      },
     });
   } catch (error) {
-    console.error("POST companies CATCH ERROR:", error);
-
-    if (error?.code === "23505") {
-      return NextResponse.json(
-        {
-          error: "الاسم موجود بالفعل.",
-        },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json(
-      {
-        error: "فشل في إنشاء الشركة",
-        debug: error.message,
-        stack:
-          process.env.NODE_ENV === "development"
-            ? error.stack
-            : undefined,
-      },
-      { status: 500 }
+    return debugResponse(
+      "POST companies crashed",
+      error
     );
   }
 }
 
 // =========================
-// UPDATE COMPANY
+// PATCH
 // =========================
+
 export async function PATCH(req) {
   try {
-    logStep("PATCH /companies START");
+    logStep("PATCH COMPANIES START");
 
     const user = await verifyToken(req.headers);
 
-    logStep("VERIFY TOKEN RESULT", user);
-
     if (!user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
+      return debugResponse(
+        "Unauthorized",
+        null,
+        401
       );
     }
 
@@ -319,25 +259,19 @@ export async function PATCH(req) {
 
     const { id, name } = body;
 
-    if (!id || !name) {
-      return NextResponse.json(
-        {
-          error: "Missing id or name",
-        },
-        { status: 400 }
+    if (!id) {
+      return debugResponse(
+        "ID مطلوب",
+        null,
+        400
       );
     }
 
-    if (
-      typeof name !== "string" ||
-      name.trim().length < 3
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "اسم الشركة غير صالح. يجب أن يكون نصاً لا يقل عن 3 أحرف.",
-        },
-        { status: 400 }
+    if (!name) {
+      return debugResponse(
+        "الاسم مطلوب",
+        null,
+        400
       );
     }
 
@@ -359,55 +293,20 @@ export async function PATCH(req) {
     });
 
     if (updateError) {
-      console.error("UPDATE ERROR:", updateError);
-
-      if (updateError.code === "23505") {
-        return NextResponse.json(
-          {
-            error:
-              "الاسم موجود بالفعل. الرجاء اختيار اسم آخر.",
-          },
-          { status: 409 }
-        );
-      }
-
-      return NextResponse.json(
-        {
-          error: "Update failed",
-          details: updateError.message,
-          code: updateError.code,
-        },
-        { status: 500 }
-      );
-    }
-
-    if (!updatedCompany) {
-      return NextResponse.json(
-        {
-          error: "Company not found",
-        },
-        { status: 404 }
+      return debugResponse(
+        "فشل تحديث الشركة",
+        updateError
       );
     }
 
     return NextResponse.json({
-      id: updatedCompany.id,
-      _id: updatedCompany.id,
-      name: updatedCompany.name,
+      success: true,
+      company: updatedCompany,
     });
   } catch (error) {
-    console.error("PATCH companies CATCH ERROR:", error);
-
-    return NextResponse.json(
-      {
-        error: "فشل في تحديث الشركة",
-        debug: error.message,
-        stack:
-          process.env.NODE_ENV === "development"
-            ? error.stack
-            : undefined,
-      },
-      { status: 500 }
+    return debugResponse(
+      "PATCH companies crashed",
+      error
     );
   }
 }
