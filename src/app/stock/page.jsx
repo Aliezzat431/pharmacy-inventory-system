@@ -16,44 +16,17 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
 
-import { Checkbox } from "@/components/ui/checkbox";
-
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-
 import {
   Search,
   Plus,
-  Save,
   Trash2,
   ChevronDown,
   ChevronRight,
   AlertTriangle,
-  Package,
-  X,
-  Layers,
-  ShieldAlert,
-  TrendingUp,
-  Boxes,
-  Clock,
-  SlidersHorizontal,
-  CheckSquare,
 } from "lucide-react";
 
 import { toast } from "sonner";
@@ -69,7 +42,7 @@ import { cn } from "@/lib/utils";
    DEBUG HELPERS
 ========================================================= */
 
-const debug = (...args: any[]) => {
+const debug = (...args) => {
   console.log(
     "%c[STOCK DEBUG]",
     "background:#111;color:#0f0;padding:2px 6px;border-radius:4px",
@@ -77,7 +50,7 @@ const debug = (...args: any[]) => {
   );
 };
 
-const debugError = (...args: any[]) => {
+const debugError = (...args) => {
   console.error(
     "%c[STOCK ERROR]",
     "background:#500;color:#fff;padding:2px 6px;border-radius:4px",
@@ -85,7 +58,7 @@ const debugError = (...args: any[]) => {
   );
 };
 
-const debugWarn = (...args: any[]) => {
+const debugWarn = (...args) => {
   console.warn(
     "%c[STOCK WARN]",
     "background:#aa7700;color:#fff;padding:2px 6px;border-radius:4px",
@@ -97,7 +70,7 @@ const debugWarn = (...args: any[]) => {
    SAFE ARRAY
 ========================================================= */
 
-const safeArray = (value: any, label = "unknown") => {
+const safeArray = (value, label = "unknown") => {
   debug(`safeArray called -> ${label}`, {
     value,
     type: typeof value,
@@ -140,7 +113,7 @@ const safeArray = (value: any, label = "unknown") => {
    EXPIRY HELPERS
 ========================================================= */
 
-const getExpiryStatus = (expiryDate: string) => {
+const getExpiryStatus = (expiryDate) => {
   debug("getExpiryStatus", expiryDate);
 
   if (!expiryDate) return "none";
@@ -165,7 +138,7 @@ const getExpiryStatus = (expiryDate: string) => {
   return "ok";
 };
 
-const ExpiryBadge = ({ expiryDate }: any) => {
+const ExpiryBadge = ({ expiryDate }) => {
   const status = getExpiryStatus(expiryDate);
 
   if (status === "none") {
@@ -188,7 +161,7 @@ const ExpiryBadge = ({ expiryDate }: any) => {
     month: "short",
   });
 
-  const configs: any = {
+  const configs = {
     expired: {
       cls: "bg-destructive/15 text-destructive border-destructive/30",
       icon: "⚠️",
@@ -236,24 +209,24 @@ const ExpiryBadge = ({ expiryDate }: any) => {
 const Stock = () => {
   debug("COMPONENT RENDER");
 
-  const [batches, setBatches] = useState<any[]>([]);
-  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [batches, setBatches] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [searchMode, setSearchMode] = useState("all");
 
   const [selectedBatchIds, setSelectedBatchIds] =
-    useState<string[]>([]);
+    useState([]);
 
-  const [deleteId, setDeleteId] = useState<any>(null);
+  const [deleteId, setDeleteId] = useState(null);
 
   const [openModal, setOpenModal] = useState(false);
 
   const [editingStockProduct, setEditingStockProduct] =
-    useState<any>(null);
+    useState(null);
 
   const [batchEntryTarget, setBatchEntryTarget] =
-    useState<any>(null);
+    useState(null);
 
   const [expandedProducts, setExpandedProducts] =
     useState(new Set());
@@ -292,7 +265,10 @@ const Stock = () => {
 
         debug("SUPPLIERS TYPE", typeof res.data?.suppliers);
 
-        debug("SUPPLIERS IS ARRAY", Array.isArray(res.data?.suppliers));
+        debug(
+          "SUPPLIERS IS ARRAY",
+          Array.isArray(res.data?.suppliers)
+        );
 
         const normalizedSuppliers = safeArray(
           res.data?.suppliers,
@@ -344,17 +320,15 @@ const Stock = () => {
 
       debug("PRODUCTS RAW", response.data?.products);
 
-      debug("PRODUCTS TYPE", typeof response.data?.products);
+      debug(
+        "PRODUCTS TYPE",
+        typeof response.data?.products
+      );
 
       debug(
         "PRODUCTS IS ARRAY",
         Array.isArray(response.data?.products)
       );
-
-      /*
-        THIS IS IMPORTANT
-        TO DETECT WHY .map FAILS
-      */
 
       if (
         response.data?.products &&
@@ -375,7 +349,7 @@ const Stock = () => {
 
       debug(
         "PRODUCTS EVERY ITEM",
-        products.map((item: any, index: number) => ({
+        products.map((item, index) => ({
           index,
           type: typeof item,
           item,
@@ -383,7 +357,7 @@ const Stock = () => {
       );
 
       const batchesList = products.map(
-        (batch: any, index: number) => {
+        (batch, index) => {
           debug("MAPPING BATCH", {
             index,
             batch,
@@ -400,12 +374,15 @@ const Stock = () => {
       debug("FINAL BATCHES LIST", batchesList);
 
       setBatches(batchesList);
-    } catch (error: any) {
+    } catch (error) {
       debugError("fetchBatches FAILED", error);
 
       debugError("ERROR RESPONSE", error?.response);
 
-      debugError("ERROR RESPONSE DATA", error?.response?.data);
+      debugError(
+        "ERROR RESPONSE DATA",
+        error?.response?.data
+      );
 
       setBatches([]);
     }
@@ -470,10 +447,10 @@ const Stock = () => {
 
     debug("BATCHES BEFORE GROUP", batches);
 
-    const groups: any = {};
+    const groups = {};
 
     safeArray(batches, "batches for grouping").forEach(
-      (batch: any, index: number) => {
+      (batch, index) => {
         debug("GROUP LOOP ITEM", {
           index,
           batch,
@@ -529,8 +506,8 @@ const Stock = () => {
   ========================================================= */
 
   const updateBatchState = (
-    batchId: string,
-    changes: any
+    batchId,
+    changes
   ) => {
     debug("updateBatchState", {
       batchId,
@@ -543,7 +520,7 @@ const Stock = () => {
       const updated = safeArray(
         prev,
         "updateBatchState prev"
-      ).map((batch: any) =>
+      ).map((batch) =>
         batch.batchId?.toString() ===
         batchId?.toString()
           ? { ...batch, ...changes }
@@ -560,7 +537,7 @@ const Stock = () => {
      TOGGLE PRODUCT
   ========================================================= */
 
-  const toggleProduct = (productId: string) => {
+  const toggleProduct = (productId) => {
     debug("toggleProduct", productId);
 
     setExpandedProducts((prev) => {
@@ -637,7 +614,7 @@ const Stock = () => {
   const expiringSoon = safeArray(
     batches,
     "expiringSoon"
-  ).filter((p: any) =>
+  ).filter((p) =>
     ["critical", "warning"].includes(
       getExpiryStatus(p.expiryDate)
     )
@@ -647,7 +624,7 @@ const Stock = () => {
     batches,
     "lowStock"
   ).filter(
-    (p: any) =>
+    (p) =>
       Number(p.quantity) > 0 &&
       Number(p.quantity) <= 10
   ).length;
@@ -668,8 +645,6 @@ const Stock = () => {
       className="p-4 md:p-8 w-full min-h-screen flex flex-col gap-5"
       dir="rtl"
     >
-      {/* SEARCH */}
-
       <div className="flex gap-3">
         <div className="relative flex-1">
           <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4" />
@@ -677,7 +652,10 @@ const Stock = () => {
           <Input
             value={searchTerm}
             onChange={(e) => {
-              debug("SEARCH INPUT CHANGE", e.target.value);
+              debug(
+                "SEARCH INPUT CHANGE",
+                e.target.value
+              );
 
               setSearchTerm(e.target.value);
             }}
@@ -696,12 +674,9 @@ const Stock = () => {
           }}
         >
           <Plus className="h-4 w-4 ml-2" />
-
           منتج جديد
         </Button>
       </div>
-
-      {/* STATS */}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 border rounded-xl">
@@ -721,18 +696,13 @@ const Stock = () => {
         </div>
       </div>
 
-      {/* TABLE */}
-
       <div className="border rounded-2xl overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>المنتج</TableHead>
-
               <TableHead>الكمية</TableHead>
-
               <TableHead>السعر</TableHead>
-
               <TableHead>الإجراءات</TableHead>
             </TableRow>
           </TableHeader>
@@ -751,7 +721,7 @@ const Stock = () => {
               safeArray(
                 groupedProducts,
                 "render groupedProducts"
-              ).map((product: any, productIndex: number) => {
+              ).map((product, productIndex) => {
                 debug("RENDER PRODUCT", {
                   productIndex,
                   product,
@@ -823,8 +793,8 @@ const Stock = () => {
                         "product batches render"
                       ).map(
                         (
-                          batch: any,
-                          batchIndex: number
+                          batch,
+                          batchIndex
                         ) => {
                           debug(
                             "RENDER BATCH",
@@ -900,8 +870,6 @@ const Stock = () => {
         </Table>
       </div>
 
-      {/* DELETE DIALOG */}
-
       <Dialog
         open={!!deleteId}
         onOpenChange={(v) => {
@@ -943,8 +911,6 @@ const Stock = () => {
         </DialogContent>
       </Dialog>
 
-      {/* CREATE PRODUCT */}
-
       <CreateProductForm
         openModal={openModal}
         setOpenModal={setOpenModal}
@@ -966,10 +932,8 @@ const Stock = () => {
         }}
       />
 
-      {/* BARCODE */}
-
       <BarcodeScanner
-        onScan={(barcode: string) => {
+        onScan={(barcode) => {
           debug("BARCODE SCANNED", barcode);
 
           setSearchTerm(barcode);
@@ -980,8 +944,6 @@ const Stock = () => {
           );
         }}
       />
-
-      {/* BATCH ENTRY */}
 
       {batchEntryTarget && (
         <BatchEntryDialog
