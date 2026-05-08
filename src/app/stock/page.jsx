@@ -15,7 +15,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+} from "@/components/ui/dialog";
 
 import {
   Search,
@@ -34,15 +37,28 @@ import BatchEntryDialog from "../components/BatchEntryDialog";
 import { cn } from "@/lib/utils";
 
 /* =========================================================
-   ERROR HANDLING (UI BASED INSTEAD OF ALERTS)
+   SAFE ARRAY
+========================================================= */
+
+const safeArray = (value) => {
+  try {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") return Object.values(value);
+    return [];
+  } catch {
+    return [];
+  }
+};
+
+/* =========================================================
+   MAIN COMPONENT
 ========================================================= */
 
 const Stock = () => {
   const [batches, setBatches] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [searchMode, setSearchMode] = useState("all");
-  const [selectedBatchIds] = useState([]);
+  const [searchMode] = useState("all");
   const [deleteId, setDeleteId] = useState(null);
   const [openModal, setOpenModal] = useState(false);
   const [editingStockProduct, setEditingStockProduct] = useState(null);
@@ -51,69 +67,10 @@ const Stock = () => {
   const [errors, setErrors] = useState([]);
 
   const pushError = (msg) => {
-    setErrors((prev) => [msg, ...prev].slice(0, 5));
-  };
-
-  /* =========================================================
-     SAFE ARRAY
-  ========================================================= */
-
-  const safeArray = (value) => {
-    try {
-      if (Array.isArray(value)) return value;
-      if (value && typeof value === "object") return Object.values(value);
-      return [];
-    } catch (e) {
-      pushError("safeArray error");
-      return [];
-    }
-  };
-
-  /* =========================================================
-     EXPIRY
-  ========================================================= */
-
-  const getExpiryStatus = (expiryDate) => {
-    if (!expiryDate) return "none";
-
-    try {
-      const now = new Date();
-      const exp = new Date(expiryDate);
-
-      const daysLeft = Math.ceil(
-        (exp - now) / (1000 * 60 * 60 * 24)
-      );
-
-      if (daysLeft < 0) return "expired";
-      if (daysLeft <= 30) return "critical";
-      if (daysLeft <= 90) return "warning";
-      return "ok";
-    } catch {
-      pushError("expiry calc error");
-      return "none";
-    }
-  };
-
-  const ExpiryBadge = ({ expiryDate }) => {
-    const status = getExpiryStatus(expiryDate);
-
-    if (status === "none") return <span>—</span>;
-
-    const exp = new Date(expiryDate);
-    const daysLeft = Math.ceil((exp - new Date()) / (1000 * 60 * 60 * 24));
-
-    const map = {
-      expired: "red",
-      critical: "orange",
-      warning: "yellow",
-      ok: "green",
-    };
-
-    return (
-      <span className={cn("text-xs font-bold", `text-${map[status]}-500`)}>
-        {exp.toLocaleDateString()} ({daysLeft}d)
-      </span>
-    );
+    setErrors((prev) => {
+      const updated = [msg, ...prev];
+      return updated.slice(0, 4);
+    });
   };
 
   /* =========================================================
@@ -130,9 +87,10 @@ const Stock = () => {
         });
 
         setSuppliers(safeArray(res.data?.suppliers));
-      } catch (e) {
-        pushError("failed to load suppliers");
+      } catch (err) {
+        pushError("فشل تحميل الموردين");
         setSuppliers([]);
+        console.error(err);
       }
     };
 
@@ -143,12 +101,12 @@ const Stock = () => {
      FETCH BATCHES
   ========================================================= */
 
-  const fetchBatches = async (q = "", mode = "all") => {
+  const fetchBatches = async (query = "", mode = "all") => {
     try {
       const token = Cookies.get("token");
 
       const res = await axios.get("/api/search", {
-        params: { q, mode },
+        params: { q: query, mode },
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -160,9 +118,10 @@ const Stock = () => {
           batchId: b.batchId || b._id,
         }))
       );
-    } catch (e) {
-      pushError("failed to fetch products");
+    } catch (err) {
+      pushError("فشل تحميل المنتجات");
       setBatches([]);
+      console.error(err);
     }
   };
 
@@ -175,7 +134,24 @@ const Stock = () => {
   }, [searchTerm, searchMode]);
 
   /* =========================================================
-     GROUPING
+     REALTIME
+  ========================================================= */
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("stock_realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "products" },
+        () => fetchBatches(searchTerm, searchMode)
+      )
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, [searchTerm, searchMode]);
+
+  /* =========================================================
+     GROUP PRODUCTS
   ========================================================= */
 
   const groupedProducts = useMemo(() => {
@@ -199,7 +175,7 @@ const Stock = () => {
   }, [batches]);
 
   /* =========================================================
-     UPDATE
+     UPDATE BATCH
   ========================================================= */
 
   const updateBatchState = (id, changes) => {
@@ -211,7 +187,7 @@ const Stock = () => {
   };
 
   /* =========================================================
-     TOGGLE
+     TOGGLE PRODUCT
   ========================================================= */
 
   const toggleProduct = (id) => {
@@ -234,11 +210,12 @@ const Stock = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      toast.success("Deleted");
+      toast.success("تم الحذف");
       setDeleteId(null);
       fetchBatches(searchTerm, searchMode);
-    } catch {
-      pushError("delete failed");
+    } catch (err) {
+      pushError("فشل الحذف");
+      console.error(err);
     }
   };
 
@@ -249,17 +226,21 @@ const Stock = () => {
   return (
     <div className="p-4 flex flex-col gap-4" dir="rtl">
 
-      {/* ERRORS TOP BAR */}
+      {/* ERRORS (NON BLOCKING) */}
       {errors.length > 0 && (
-        <div className="bg-red-100 border border-red-400 p-2 rounded">
+        <div className="space-y-2">
           {errors.map((e, i) => (
-            <div key={i} className="text-red-600 text-sm">
+            <div
+              key={i}
+              className="bg-red-50 border border-red-200 text-red-700 text-sm p-2 rounded"
+            >
               {e}
             </div>
           ))}
         </div>
       )}
 
+      {/* SEARCH */}
       <div className="flex gap-2">
         <Search />
         <Input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
@@ -268,6 +249,7 @@ const Stock = () => {
         </Button>
       </div>
 
+      {/* TABLE */}
       <Table>
         <TableHeader>
           <TableRow>
@@ -284,10 +266,12 @@ const Stock = () => {
                 <TableCell>{p.name}</TableCell>
                 <TableCell>{p.totalQuantity}</TableCell>
                 <TableCell>
-                  <Button onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteId({ productId: p.productId });
-                  }}>
+                  <Button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteId({ productId: p.productId });
+                    }}
+                  >
                     <Trash2 />
                   </Button>
                 </TableCell>
@@ -307,9 +291,6 @@ const Stock = () => {
                         }
                       />
                     </TableCell>
-                    <TableCell>
-                      <ExpiryBadge expiryDate={b.expiryDate} />
-                    </TableCell>
                   </TableRow>
                 ))}
             </React.Fragment>
@@ -317,17 +298,20 @@ const Stock = () => {
         </TableBody>
       </Table>
 
-      {/* DELETE */}
+      {/* DELETE DIALOG (NOT BLOCKING PAGE FLOW) */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent>
           <AlertTriangle />
-          <Button onClick={handleDelete}>Delete</Button>
+          <Button onClick={handleDelete}>حذف</Button>
         </DialogContent>
       </Dialog>
 
       <CreateProductForm
         openModal={openModal}
         setOpenModal={setOpenModal}
+        editingStockProduct={editingStockProduct}
+        setEditingStockProduct={setEditingStockProduct}
+        onSuccess={() => fetchBatches(searchTerm, searchMode)}
       />
 
       <BarcodeScanner
@@ -338,6 +322,9 @@ const Stock = () => {
         <BatchEntryDialog
           open={!!batchEntryTarget}
           onClose={() => setBatchEntryTarget(null)}
+          productName={batchEntryTarget?.name}
+          productId={batchEntryTarget?.productId}
+          suppliers={suppliers}
         />
       )}
     </div>
