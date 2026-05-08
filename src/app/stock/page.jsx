@@ -134,6 +134,49 @@ const Stock = () => {
     }
   };
 
+  /* =========================================================
+   GROUP PRODUCTS
+========================================================= */
+const groupedProducts = useMemo(() => {
+  const grouped = {};
+
+  safeArray(batches).forEach((batch) => {
+    const productId = batch.productId || batch._id;
+
+    if (!grouped[productId]) {
+      grouped[productId] = {
+        productId,
+        name: batch.name || "منتج بدون اسم",
+        totalQuantity: 0,
+        batches: [],
+      };
+    }
+
+    grouped[productId].totalQuantity += Number(batch.quantity || 0);
+
+    grouped[productId].batches.push(batch);
+  });
+
+  return Object.values(grouped);
+}, [batches]);
+
+/* =========================================================
+   TOGGLE PRODUCT ROW
+========================================================= */
+const toggleProduct = (productId) => {
+  setExpandedProducts((prev) => {
+    const next = new Set(prev);
+
+    if (next.has(productId)) {
+      next.delete(productId);
+    } else {
+      next.add(productId);
+    }
+
+    return next;
+  });
+};
+
   return (
     <div className="p-4 flex flex-col gap-4" dir="rtl">
       
