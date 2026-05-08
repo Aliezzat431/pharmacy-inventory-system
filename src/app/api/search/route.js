@@ -16,6 +16,13 @@ const TYPE_UNIT_MAP = treatmentTypes.reduce((acc, t) => {
 }, {});
 
 /* ---------------------------
+   HELPERS (FORCE SAFE TYPES)
+----------------------------*/
+const safeArray = (v) => (Array.isArray(v) ? v : []);
+const safeNumber = (v) => (typeof v === "number" ? v : Number(v) || 0);
+const safeString = (v) => (typeof v === "string" ? v : "");
+
+/* ---------------------------
    DERIVE UNIT OPTIONS
 ----------------------------*/
 function deriveUnitOptions(productMeta) {
@@ -25,9 +32,12 @@ function deriveUnitOptions(productMeta) {
     return typeInfo.units;
   }
 
-  return productMeta.unit_options?.length
+  return Array.isArray(productMeta.unit_options) &&
+    productMeta.unit_options.length
     ? productMeta.unit_options
-    : [productMeta.unit];
+    : productMeta.unit
+    ? [productMeta.unit]
+    : [];
 }
 
 /* ---------------------------
@@ -39,7 +49,11 @@ export async function GET(req) {
 
     if (!user) {
       return NextResponse.json(
-        { error: "Unauthorized" },
+        {
+          success: false,
+          error: "Unauthorized",
+          products: [],
+        },
         { status: 401 }
       );
     }
@@ -56,9 +70,7 @@ export async function GET(req) {
       .select("*, batches(*)");
 
     if (query) {
-      queryBuilder = queryBuilder.or(
-        `name.ilike.%${query}%`
-      );
+      queryBuilder = queryBuilder.or(`name.ilike.%${query}%`);
     }
 
     if (mode === "shortcomings") {
@@ -69,71 +81,66 @@ export async function GET(req) {
 
     if (error) throw error;
 
-    const safeProducts = Array.isArray(rawProducts)
-      ? rawProducts
-      : [];
+    const safeProducts = safeArray(rawProducts);
 
     /* ---------------------------
-       NORMALIZE RESPONSE
+       NORMALIZED PRODUCTS
     ----------------------------*/
     const products = safeProducts.map((product) => {
-      const { batches, ...productMeta } = product;
+      const productMeta = product || {};
+      const batches = safeArray(productMeta.batches);
 
       const unitOptions = deriveUnitOptions(productMeta);
 
-      const safeBatches = Array.isArray(batches)
-        ? batches
-        : [];
+      const normalizedBatches = batches.map((b) => ({
+        batchId: safeString(b.id),
+        barcode: safeString(b.barcode),
+        quantity: safeNumber(b.quantity),
+        price: safeNumber(b.selling_price),
+        purchasePrice: safeNumber(b.purchase_price),
+        expiryDate: safeString(b.expiry_date),
+        purchaseDate: safeString(b.purchase_date),
+        supplier: safeString(b.supplier),
+        invoiceNumber: safeString(b.invoice_number),
+        batchNumber: safeString(b.batch_number),
+        isActive: Boolean(b.is_active),
+        notes: safeString(b.notes),
+      }));
 
-      const totalQuantity = safeBatches.reduce(
-        (sum, b) => sum + (b.quantity || 0),
+      const totalQuantity = normalizedBatches.reduce(
+        (sum, b) => sum + b.quantity,
         0
       );
 
-      const prices = safeBatches.map(
-        (b) => b.selling_price || 0
-      );
+      const prices = normalizedBatches.map((b) => b.price);
 
       return {
-        _id: product.id,
-        name: product.name,
-        type: product.type,
+        _id: safeString(productMeta.id),
+        name: safeString(productMeta.name),
+        type: safeString(productMeta.type),
 
         unitOptions,
 
         totalQuantity,
 
-        lowestPrice: prices.length
-          ? Math.min(...prices)
-          : 0,
+        lowestPrice: prices.length ? Math.min(...prices) : 0,
+        highestPrice: prices.length ? Math.max(...prices) : 0,
 
-        highestPrice: prices.length
-          ? Math.max(...prices)
-          : 0,
-
-        batches: safeBatches.map((b) => ({
-          batchId: b.id,
-          barcode: b.barcode,
-          quantity: b.quantity,
-          price: b.selling_price,
-          purchasePrice: b.purchase_price,
-          expiryDate: b.expiry_date,
-          purchaseDate: b.purchase_date,
-          supplier: b.supplier,
-          invoiceNumber: b.invoice_number,
-          batchNumber: b.batch_number,
-          isActive: b.is_active,
-          notes: b.notes,
-        })),
+        batches: normalizedBatches,
       };
     });
 
     /* ---------------------------
-       FINAL RESPONSE
+       FINAL RESPONSE (FIXED SHAPE ALWAYS)
     ----------------------------*/
     return NextResponse.json({
       success: true,
-      products,
+      products: safeArray(products),
+      meta: {
+        count: products.length,
+        mode,
+        query: query || "",
+      },
     });
   } catch (error) {
     console.error("Search API Error:", error);
@@ -143,6 +150,9 @@ export async function GET(req) {
         success: false,
         error: "Server error: " + error.message,
         products: [],
+        meta: {
+          count: 0,
+        },
       },
       { status: 500 }
     );
