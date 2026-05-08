@@ -28,7 +28,7 @@ import {
   X,
 } from "lucide-react";
 
-import { toast } from "sonner"; // Kept for success messages only
+import { toast } from "sonner"; 
 import Cookies from "js-cookie";
 
 import { supabase } from "../lib/supabase";
@@ -49,9 +49,6 @@ const safeArray = (value) => {
   }
 };
 
-/* =========================================================
-   MAIN COMPONENT
-========================================================= */
 const Stock = () => {
   const [batches, setBatches] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
@@ -63,40 +60,29 @@ const Stock = () => {
   const [batchEntryTarget, setBatchEntryTarget] = useState(null);
   const [expandedProducts, setExpandedProducts] = useState(new Set());
   
-  // State for top-of-page error messages
+  // Internal state for text-only error reporting
   const [errors, setErrors] = useState([]);
 
+  // Silent error handler: no toasts, no global flags
   const pushError = (msg) => {
-    setErrors((prev) => {
-      const updated = [msg, ...prev];
-      return updated.slice(0, 5); // Keep last 5 errors
-    });
+    setErrors((prev) => [msg, ...prev].slice(0, 3));
   };
 
-  const clearErrors = () => setErrors([]);
-
   /* =========================================================
-     FETCH SUPPLIERS
+     FETCH DATA (SILENT CATCH)
   ========================================================= */
-  useEffect(() => {
-    const fetchSuppliers = async () => {
-      try {
-        const token = Cookies.get("token");
-        const res = await axios.get("/api/suppliers", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setSuppliers(safeArray(res.data?.suppliers));
-      } catch (err) {
-        pushError("حدث خطأ أثناء تحميل بيانات الموردين.");
-        setSuppliers([]);
-      }
-    };
-    fetchSuppliers();
-  }, []);
+  const fetchSuppliers = async () => {
+    try {
+      const token = Cookies.get("token");
+      const res = await axios.get("/api/suppliers", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setSuppliers(safeArray(res.data?.suppliers));
+    } catch (err) {
+      pushError("فشل في مزامنة الموردين");
+    }
+  };
 
-  /* =========================================================
-     FETCH BATCHES
-  ========================================================= */
   const fetchBatches = async (query = "", mode = "all") => {
     try {
       const token = Cookies.get("token");
@@ -104,74 +90,35 @@ const Stock = () => {
         params: { q: query, mode },
         headers: { Authorization: `Bearer ${token}` },
       });
-
       const products = safeArray(res.data?.products);
-      setBatches(
-        products.map((b) => ({
-          ...b,
-          batchId: b.batchId || b._id,
-        }))
-      );
+      setBatches(products.map(b => ({ ...b, batchId: b.batchId || b._id })));
     } catch (err) {
-      pushError("تعذر تحديث قائمة المنتجات. يرجى التحقق من الاتصال.");
-      setBatches([]);
+      pushError("خطأ في تحديث البيانات المنعكسة");
     }
   };
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      fetchBatches(searchTerm, searchMode);
-    }, 300);
+    fetchSuppliers();
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => fetchBatches(searchTerm, searchMode), 300);
     return () => clearTimeout(t);
   }, [searchTerm, searchMode]);
 
   /* =========================================================
-     REALTIME
+     ACTIONS
   ========================================================= */
-  useEffect(() => {
-    const channel = supabase
-      .channel("stock_realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "products" },
-        () => fetchBatches(searchTerm, searchMode)
-      )
-      .subscribe();
-
-    return () => supabase.removeChannel(channel);
-  }, [searchTerm, searchMode]);
-
-  const groupedProducts = useMemo(() => {
-    const groups = {};
-    safeArray(batches).forEach((b) => {
-      if (!groups[b._id]) {
-        groups[b._id] = {
-          productId: b._id,
-          name: b.name,
-          batches: [],
-          totalQuantity: 0,
-        };
-      }
-      groups[b._id].batches.push(b);
-      groups[b._id].totalQuantity += Number(b.quantity || 0);
-    });
-    return Object.values(groups);
-  }, [batches]);
-
   const updateBatchState = (id, changes) => {
-    setBatches((prev) =>
-      safeArray(prev).map((b) =>
-        b.batchId === id ? { ...b, ...changes } : b
-      )
-    );
-  };
-
-  const toggleProduct = (id) => {
-    setExpandedProducts((prev) => {
-      const s = new Set(prev);
-      s.has(id) ? s.delete(id) : s.add(id);
-      return s;
-    });
+    try {
+      setBatches((prev) =>
+        safeArray(prev).map((b) =>
+          b.batchId === id ? { ...b, ...changes } : b
+        )
+      );
+    } catch (e) {
+      pushError("تعذر تحديث الحقل محلياً");
+    }
   };
 
   const handleDelete = async () => {
@@ -180,142 +127,117 @@ const Stock = () => {
       await axios.delete(`/api/products?id=${deleteId.productId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      toast.success("تم حذف المنتج بنجاح"); // Success toasts are usually fine
       setDeleteId(null);
       fetchBatches(searchTerm, searchMode);
     } catch (err) {
-      pushError("فشل حذف المنتج. يرجى المحاولة مرة أخرى.");
+      pushError("لم يتم الحذف - خطأ في الطلب");
     }
   };
 
   return (
     <div className="p-4 flex flex-col gap-4" dir="rtl">
       
-      {/* ERRORS SECTION (TEXT AT TOP) */}
+      {/* IN-PAGE TEXT ERRORS (Replaces Pop-ups) */}
       {errors.length > 0 && (
-        <div className="relative bg-red-50 border-r-4 border-red-500 p-4 rounded shadow-sm animate-in fade-in slide-in-from-top-2">
-          <div className="flex justify-between items-start">
-            <div className="flex gap-2 text-red-800">
-              <AlertTriangle className="h-5 w-5 flex-shrink-0" />
-              <div className="flex flex-col gap-1">
-                {errors.map((e, i) => (
-                  <p key={i} className="text-sm font-medium">{e}</p>
-                ))}
-              </div>
+        <div className="bg-red-50/50 border border-red-100 p-3 rounded-md">
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1">
+              {errors.map((e, i) => (
+                <div key={i} className="text-red-600 text-xs flex items-center gap-2">
+                  <span className="w-1 h-1 bg-red-400 rounded-full" />
+                  {e}
+                </div>
+              ))}
             </div>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={clearErrors}
-              className="h-6 w-6 text-red-500 hover:bg-red-100"
-            >
-              <X className="h-4 w-4" />
+            <Button variant="ghost" size="sm" onClick={() => setErrors([])} className="h-6 w-6 p-0">
+              <X className="h-3 w-3" />
             </Button>
           </div>
         </div>
       )}
 
-      {/* SEARCH & ACTIONS */}
-      <div className="flex gap-2 items-center">
+      {/* SEARCH AREA */}
+      <div className="flex gap-2">
         <div className="relative flex-1">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input 
             className="pr-10" 
-            placeholder="بحث..."
+            placeholder="بحث في المخزون..."
             value={searchTerm} 
             onChange={(e) => setSearchTerm(e.target.value)} 
           />
         </div>
-        <Button onClick={() => setOpenModal(true)} className="gap-2">
-          <Plus className="h-4 w-4" /> منتج جديد
+        <Button onClick={() => setOpenModal(true)} variant="default">
+          <Plus className="ml-2 h-4 w-4" /> جديد
         </Button>
       </div>
 
-      {/* TABLE */}
-      <div className="border rounded-lg overflow-hidden">
+      {/* MAIN DATA TABLE */}
+      <div className="rounded-md border">
         <Table>
-          <TableHeader className="bg-muted/50">
-            <TableRow>
-              <TableHead className="text-right">المنتج</TableHead>
-              <TableHead className="text-right">إجمالي الكمية</TableHead>
-              <TableHead className="text-center w-[100px]">إجراءات</TableHead>
+          <TableHeader>
+            <TableRow className="bg-gray-50/50">
+              <TableHead className="text-right">اسم المنتج</TableHead>
+              <TableHead className="text-right">الكمية المتوفرة</TableHead>
+              <TableHead className="text-center">تحكم</TableHead>
             </TableRow>
           </TableHeader>
 
           <TableBody>
-            {groupedProducts.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={3} className="text-center py-10 text-muted-foreground">
-                  لا توجد نتائج بحث
-                </TableCell>
-              </TableRow>
-            ) : (
-              groupedProducts.map((p) => (
-                <React.Fragment key={p.productId}>
-                  <TableRow 
-                    className="cursor-pointer hover:bg-muted/30 transition-colors"
-                    onClick={() => toggleProduct(p.productId)}
-                  >
-                    <TableCell className="font-medium">{p.name}</TableCell>
-                    <TableCell>{p.totalQuantity}</TableCell>
-                    <TableCell className="text-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteId({ productId: p.productId });
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
+            {groupedProducts.map((p) => (
+              <React.Fragment key={p.productId}>
+                <TableRow 
+                  className="cursor-pointer hover:bg-gray-50 transition-colors"
+                  onClick={() => toggleProduct(p.productId)}
+                >
+                  <TableCell className="font-medium">{p.name}</TableCell>
+                  <TableCell>{p.totalQuantity}</TableCell>
+                  <TableCell className="text-center">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteId({ productId: p.productId });
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 text-red-500" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
 
-                  {expandedProducts.has(p.productId) &&
-                    p.batches.map((b) => (
-                      <TableRow key={b.batchId} className="bg-slate-50/50">
-                        <TableCell className="pr-8 text-sm text-muted-foreground">
-                          — دفعة (Batch)
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            className="w-24 h-8"
-                            value={b.quantity || ""}
-                            onChange={(e) =>
-                              updateBatchState(b.batchId, {
-                                quantity: e.target.value,
-                              })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell />
-                      </TableRow>
-                    ))}
-                </React.Fragment>
-              ))
-            )}
+                {expandedProducts.has(p.productId) &&
+                  p.batches.map((b) => (
+                    <TableRow key={b.batchId} className="bg-gray-50/30">
+                      <TableCell className="pr-10 text-sm text-gray-500">تفاصيل الدفعة</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          className="w-20 h-8"
+                          value={b.quantity || ""}
+                          onChange={(e) => updateBatchState(b.batchId, { quantity: e.target.value })}
+                        />
+                      </TableCell>
+                      <TableCell />
+                    </TableRow>
+                  ))}
+              </React.Fragment>
+            ))}
           </TableBody>
         </Table>
       </div>
 
-      {/* DELETE DIALOG */}
+      {/* CONFIRMATION DIALOG */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
-        <DialogContent className="sm:max-w-[425px]">
-          <div className="flex flex-col items-center gap-4 py-4">
-            <div className="p-3 bg-red-100 rounded-full text-red-600">
-              <AlertTriangle className="h-6 w-6" />
+        <DialogContent>
+          <div className="flex flex-col items-center gap-3 text-center">
+            <AlertTriangle className="h-10 w-10 text-amber-500" />
+            <h2 className="text-lg font-bold">تأكيد الحذف</h2>
+            <p className="text-sm text-gray-500">لا يمكن التراجع عن هذه الخطوة.</p>
+            <div className="flex gap-2 mt-4">
+              <Button variant="outline" onClick={() => setDeleteId(null)}>إلغاء</Button>
+              <Button variant="destructive" onClick={handleDelete}>تأكيد</Button>
             </div>
-            <h3 className="text-lg font-semibold">هل أنت متأكد من الحذف؟</h3>
-            <p className="text-sm text-muted-foreground text-center">
-              سيتم حذف المنتج وجميع البيانات المتعلقة به بشكل نهائي.
-            </p>
-          </div>
-          <div className="flex gap-3 justify-center">
-            <Button variant="outline" onClick={() => setDeleteId(null)}>إلغاء</Button>
-            <Button variant="destructive" onClick={handleDelete}>تأكيد الحذف</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -327,9 +249,9 @@ const Stock = () => {
         setEditingStockProduct={setEditingStockProduct}
         onSuccess={() => fetchBatches(searchTerm, searchMode)}
       />
-
+      
       <BarcodeScanner onScan={(code) => setSearchTerm(code)} />
-
+      
       {batchEntryTarget && (
         <BatchEntryDialog
           open={!!batchEntryTarget}
