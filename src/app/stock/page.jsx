@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import axios from "axios";
 
 import {
@@ -26,18 +26,18 @@ import {
   Trash2,
   AlertTriangle,
   X,
+  ChevronDown,
+  ChevronLeft,
 } from "lucide-react";
 
-import { toast } from "sonner"; 
 import Cookies from "js-cookie";
 
-import { supabase } from "../lib/supabase";
 import CreateProductForm from "../components/createProduct";
 import BarcodeScanner from "../components/BarcodeScanner";
 import BatchEntryDialog from "../components/BatchEntryDialog";
 
 /* =========================================================
-   SAFE ARRAY
+   SAFE HELPERS
 ========================================================= */
 const safeArray = (value) => {
   try {
@@ -49,261 +49,489 @@ const safeArray = (value) => {
   }
 };
 
+const safeNumber = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/* =========================================================
+   COMPONENT
+========================================================= */
 const Stock = () => {
-  const [batches, setBatches] = useState([]);
+  const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchMode] = useState("all");
+
   const [deleteId, setDeleteId] = useState(null);
+
   const [openModal, setOpenModal] = useState(false);
+
   const [editingStockProduct, setEditingStockProduct] = useState(null);
+
   const [batchEntryTarget, setBatchEntryTarget] = useState(null);
+
   const [expandedProducts, setExpandedProducts] = useState(new Set());
-  
-  // Internal state for text-only error reporting
+
   const [errors, setErrors] = useState([]);
 
-  // Silent error handler: no toasts, no global flags
+  /* =========================================================
+     ERROR HANDLER
+  ========================================================= */
   const pushError = (msg) => {
     setErrors((prev) => [msg, ...prev].slice(0, 3));
   };
 
   /* =========================================================
-     FETCH DATA (SILENT CATCH)
+     FETCH SUPPLIERS
   ========================================================= */
   const fetchSuppliers = async () => {
     try {
       const token = Cookies.get("token");
+
       const res = await axios.get("/api/suppliers", {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
+
       setSuppliers(safeArray(res.data?.suppliers));
     } catch (err) {
-      pushError("فشل في مزامنة الموردين");
+      console.error(err);
+      pushError("فشل في تحميل الموردين");
     }
   };
 
-  const fetchBatches = async (query = "", mode = "all") => {
+  /* =========================================================
+     FETCH PRODUCTS
+  ========================================================= */
+  const fetchProducts = async (query = "", mode = "all") => {
     try {
       const token = Cookies.get("token");
+
       const res = await axios.get("/api/search", {
-        params: { q: query, mode },
-        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          q: query,
+          mode,
+        },
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
-      const products = safeArray(res.data?.products);
-      setBatches(products.map(b => ({ ...b, batchId: b.batchId || b._id })));
+
+      const incomingProducts = safeArray(res.data?.products);
+
+      const normalizedProducts = incomingProducts.map((product) => ({
+        ...product,
+
+        _id: product?._id || "",
+
+        name: product?.name || "منتج بدون اسم",
+
+        totalQuantity: safeNumber(product?.totalQuantity),
+
+        batches: safeArray(product?.batches).map((batch) => ({
+          ...batch,
+
+          batchId:
+            batch?.batchId ||
+            batch?.id ||
+            crypto.randomUUID(),
+
+          quantity: safeNumber(batch?.quantity),
+        })),
+      }));
+
+      setProducts(normalizedProducts);
     } catch (err) {
-      pushError("خطأ في تحديث البيانات المنعكسة");
+      console.error(err);
+      pushError("حدث خطأ أثناء تحميل المنتجات");
     }
   };
 
+  /* =========================================================
+     INITIAL LOAD
+  ========================================================= */
   useEffect(() => {
     fetchSuppliers();
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => fetchBatches(searchTerm, searchMode), 300);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => {
+      fetchProducts(searchTerm, searchMode);
+    }, 300);
+
+    return () => clearTimeout(timer);
   }, [searchTerm, searchMode]);
 
   /* =========================================================
-     ACTIONS
+     TOGGLE PRODUCT
   ========================================================= */
-  const updateBatchState = (id, changes) => {
-    try {
-      setBatches((prev) =>
-        safeArray(prev).map((b) =>
-          b.batchId === id ? { ...b, ...changes } : b
-        )
-      );
-    } catch (e) {
-      pushError("تعذر تحديث الحقل محلياً");
-    }
+  const toggleProduct = (productId) => {
+    setExpandedProducts((prev) => {
+      const next = new Set(prev);
+
+      if (next.has(productId)) {
+        next.delete(productId);
+      } else {
+        next.add(productId);
+      }
+
+      return next;
+    });
   };
 
-  const handleDelete = async () => {
+  /* =========================================================
+     UPDATE BATCH STATE
+  ========================================================= */
+  const updateBatchState = (batchId, changes) => {
     try {
-      const token = Cookies.get("token");
-      await axios.delete(`/api/products?id=${deleteId.productId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setDeleteId(null);
-      fetchBatches(searchTerm, searchMode);
+      setProducts((prev) =>
+        safeArray(prev).map((product) => ({
+          ...product,
+
+          batches: safeArray(product.batches).map((batch) =>
+            batch.batchId === batchId
+              ? {
+                  ...batch,
+                  ...changes,
+                }
+              : batch
+          ),
+        }))
+      );
     } catch (err) {
-      pushError("لم يتم الحذف - خطأ في الطلب");
+      console.error(err);
+      pushError("تعذر تحديث بيانات الدفعة");
     }
   };
 
   /* =========================================================
-   GROUP PRODUCTS
-========================================================= */
-const groupedProducts = useMemo(() => {
-  const grouped = {};
+     DELETE PRODUCT
+  ========================================================= */
+  const handleDelete = async () => {
+    try {
+      if (!deleteId?.productId) return;
 
-  safeArray(batches).forEach((batch) => {
-    const productId = batch.productId || batch._id;
+      const token = Cookies.get("token");
 
-    if (!grouped[productId]) {
-      grouped[productId] = {
-        productId,
-        name: batch.name || "منتج بدون اسم",
-        totalQuantity: 0,
-        batches: [],
-      };
+      await axios.delete(
+        `/api/products?id=${deleteId.productId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      setDeleteId(null);
+
+      fetchProducts(searchTerm, searchMode);
+    } catch (err) {
+      console.error(err);
+      pushError("فشل حذف المنتج");
     }
+  };
 
-    grouped[productId].totalQuantity += Number(batch.quantity || 0);
-
-    grouped[productId].batches.push(batch);
-  });
-
-  return Object.values(grouped);
-}, [batches]);
-
-/* =========================================================
-   TOGGLE PRODUCT ROW
-========================================================= */
-const toggleProduct = (productId) => {
-  setExpandedProducts((prev) => {
-    const next = new Set(prev);
-
-    if (next.has(productId)) {
-      next.delete(productId);
-    } else {
-      next.add(productId);
-    }
-
-    return next;
-  });
-};
-
+  /* =========================================================
+     RENDER
+  ========================================================= */
   return (
     <div className="p-4 flex flex-col gap-4" dir="rtl">
-      
-      {/* IN-PAGE TEXT ERRORS (Replaces Pop-ups) */}
+
+      {/* =====================================================
+          ERRORS
+      ====================================================== */}
       {errors.length > 0 && (
-        <div className="bg-red-50/50 border border-red-100 p-3 rounded-md">
-          <div className="flex items-center justify-between">
+        <div className="bg-red-50 border border-red-100 rounded-md p-3">
+          <div className="flex items-start justify-between gap-3">
+
             <div className="flex flex-col gap-1">
-              {errors.map((e, i) => (
-                <div key={i} className="text-red-600 text-xs flex items-center gap-2">
-                  <span className="w-1 h-1 bg-red-400 rounded-full" />
-                  {e}
+              {errors.map((error, index) => (
+                <div
+                  key={index}
+                  className="text-red-600 text-xs flex items-center gap-2"
+                >
+                  <span className="w-1 h-1 rounded-full bg-red-500" />
+                  {error}
                 </div>
               ))}
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setErrors([])} className="h-6 w-6 p-0">
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              onClick={() => setErrors([])}
+            >
               <X className="h-3 w-3" />
             </Button>
+
           </div>
         </div>
       )}
 
-      {/* SEARCH AREA */}
+      {/* =====================================================
+          SEARCH + ACTIONS
+      ====================================================== */}
       <div className="flex gap-2">
+
         <div className="relative flex-1">
+
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input 
-            className="pr-10" 
+
+          <Input
+            className="pr-10"
             placeholder="بحث في المخزون..."
-            value={searchTerm} 
-            onChange={(e) => setSearchTerm(e.target.value)} 
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
           />
+
         </div>
-        <Button onClick={() => setOpenModal(true)} variant="default">
-          <Plus className="ml-2 h-4 w-4" /> جديد
+
+        <Button
+          variant="default"
+          onClick={() => setOpenModal(true)}
+        >
+          <Plus className="ml-2 h-4 w-4" />
+          جديد
         </Button>
+
       </div>
 
-      {/* MAIN DATA TABLE */}
-      <div className="rounded-md border">
+      {/* =====================================================
+          TABLE
+      ====================================================== */}
+      <div className="rounded-md border overflow-hidden">
+
         <Table>
+
           <TableHeader>
-            <TableRow className="bg-gray-50/50">
-              <TableHead className="text-right">اسم المنتج</TableHead>
-              <TableHead className="text-right">الكمية المتوفرة</TableHead>
-              <TableHead className="text-center">تحكم</TableHead>
+            <TableRow className="bg-gray-50/70">
+
+              <TableHead className="text-right">
+                المنتج
+              </TableHead>
+
+              <TableHead className="text-right">
+                الكمية
+              </TableHead>
+
+              <TableHead className="text-center">
+                تحكم
+              </TableHead>
+
             </TableRow>
           </TableHeader>
 
           <TableBody>
-            {groupedProducts.map((p) => (
-              <React.Fragment key={p.productId}>
-                <TableRow 
-                  className="cursor-pointer hover:bg-gray-50 transition-colors"
-                  onClick={() => toggleProduct(p.productId)}
-                >
-                  <TableCell className="font-medium">{p.name}</TableCell>
-                  <TableCell>{p.totalQuantity}</TableCell>
-                  <TableCell className="text-center">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteId({ productId: p.productId });
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
 
-                {expandedProducts.has(p.productId) &&
-                  p.batches.map((b) => (
-                    <TableRow key={b.batchId} className="bg-gray-50/30">
-                      <TableCell className="pr-10 text-sm text-gray-500">تفاصيل الدفعة</TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="w-20 h-8"
-                          value={b.quantity || ""}
-                          onChange={(e) => updateBatchState(b.batchId, { quantity: e.target.value })}
-                        />
-                      </TableCell>
-                      <TableCell />
-                    </TableRow>
-                  ))}
-              </React.Fragment>
-            ))}
+            {safeArray(products).length === 0 && (
+              <TableRow>
+                <TableCell
+                  colSpan={3}
+                  className="text-center text-gray-500 py-10"
+                >
+                  لا توجد منتجات
+                </TableCell>
+              </TableRow>
+            )}
+
+            {safeArray(products).map((product) => {
+              const productId = product._id;
+
+              const isExpanded =
+                expandedProducts.has(productId);
+
+              return (
+                <React.Fragment key={productId}>
+
+                  {/* PRODUCT ROW */}
+                  <TableRow
+                    className="cursor-pointer hover:bg-gray-50 transition-colors"
+                    onClick={() => toggleProduct(productId)}
+                  >
+
+                    <TableCell className="font-medium">
+
+                      <div className="flex items-center gap-2">
+
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-gray-400" />
+                        ) : (
+                          <ChevronLeft className="h-4 w-4 text-gray-400" />
+                        )}
+
+                        <span>{product.name}</span>
+
+                      </div>
+
+                    </TableCell>
+
+                    <TableCell>
+                      {safeNumber(product.totalQuantity)}
+                    </TableCell>
+
+                    <TableCell className="text-center">
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+
+                          setDeleteId({
+                            productId,
+                          });
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+
+                    </TableCell>
+
+                  </TableRow>
+
+                  {/* BATCHES */}
+                  {isExpanded &&
+                    safeArray(product.batches).map((batch) => (
+                      <TableRow
+                        key={batch.batchId}
+                        className="bg-gray-50/40"
+                      >
+
+                        <TableCell className="pr-10">
+
+                          <div className="flex flex-col gap-1 text-sm">
+
+                            <span className="text-gray-700">
+                              باركود:
+                              {" "}
+                              {batch.barcode || "-"}
+                            </span>
+
+                            <span className="text-gray-500 text-xs">
+                              دفعة:
+                              {" "}
+                              {batch.batchNumber || "-"}
+                            </span>
+
+                          </div>
+
+                        </TableCell>
+
+                        <TableCell>
+
+                          <Input
+                            type="number"
+                            className="w-24 h-8"
+                            value={batch.quantity || ""}
+                            onChange={(e) =>
+                              updateBatchState(
+                                batch.batchId,
+                                {
+                                  quantity: e.target.value,
+                                }
+                              )
+                            }
+                          />
+
+                        </TableCell>
+
+                        <TableCell />
+
+                      </TableRow>
+                    ))}
+
+                </React.Fragment>
+              );
+            })}
+
           </TableBody>
+
         </Table>
+
       </div>
 
-      {/* CONFIRMATION DIALOG */}
-      <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+      {/* =====================================================
+          DELETE DIALOG
+      ====================================================== */}
+      <Dialog
+        open={!!deleteId}
+        onOpenChange={() => setDeleteId(null)}
+      >
+
         <DialogContent>
+
           <div className="flex flex-col items-center gap-3 text-center">
+
             <AlertTriangle className="h-10 w-10 text-amber-500" />
-            <h2 className="text-lg font-bold">تأكيد الحذف</h2>
-            <p className="text-sm text-gray-500">لا يمكن التراجع عن هذه الخطوة.</p>
+
+            <h2 className="text-lg font-bold">
+              تأكيد الحذف
+            </h2>
+
+            <p className="text-sm text-gray-500">
+              لا يمكن التراجع عن هذه العملية
+            </p>
+
             <div className="flex gap-2 mt-4">
-              <Button variant="outline" onClick={() => setDeleteId(null)}>إلغاء</Button>
-              <Button variant="destructive" onClick={handleDelete}>تأكيد</Button>
+
+              <Button
+                variant="outline"
+                onClick={() => setDeleteId(null)}
+              >
+                إلغاء
+              </Button>
+
+              <Button
+                variant="destructive"
+                onClick={handleDelete}
+              >
+                حذف
+              </Button>
+
             </div>
+
           </div>
+
         </DialogContent>
+
       </Dialog>
 
+      {/* =====================================================
+          CREATE PRODUCT
+      ====================================================== */}
       <CreateProductForm
         openModal={openModal}
         setOpenModal={setOpenModal}
         editingStockProduct={editingStockProduct}
         setEditingStockProduct={setEditingStockProduct}
-        onSuccess={() => fetchBatches(searchTerm, searchMode)}
+        onSuccess={() =>
+          fetchProducts(searchTerm, searchMode)
+        }
       />
-      
-      <BarcodeScanner onScan={(code) => setSearchTerm(code)} />
-      
+
+      {/* =====================================================
+          BARCODE SCANNER
+      ====================================================== */}
+      <BarcodeScanner
+        onScan={(code) => setSearchTerm(code)}
+      />
+
+      {/* =====================================================
+          BATCH ENTRY
+      ====================================================== */}
       {batchEntryTarget && (
         <BatchEntryDialog
           open={!!batchEntryTarget}
           onClose={() => setBatchEntryTarget(null)}
           productName={batchEntryTarget?.name}
-          productId={batchEntryTarget?.productId}
+          productId={batchEntryTarget?._id}
           suppliers={suppliers}
         />
       )}
+
     </div>
   );
 };
