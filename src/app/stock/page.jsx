@@ -39,72 +39,61 @@ import BatchEntryDialog from "../components/BatchEntryDialog";
 import { cn } from "@/lib/utils";
 
 /* =========================================================
-   DEBUG HELPERS
+   DEBUG HELPERS (REPLACED WITH ALERTS ONLY)
 ========================================================= */
 
-const debug = (...args) => {
-  console.log(
-    "%c[STOCK DEBUG]",
-    "background:#111;color:#0f0;padding:2px 6px;border-radius:4px",
-    ...args
-  );
+const stringifyValue = (value) => {
+  try {
+    if (typeof value === "string") return value;
+    if (
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      value === null ||
+      value === undefined
+    ) {
+      return String(value);
+    }
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "[UNSERIALIZABLE VALUE]";
+  }
 };
 
-const debugError = (...args) => {
-  console.error(
-    "%c[STOCK ERROR]",
-    "background:#500;color:#fff;padding:2px 6px;border-radius:4px",
-    ...args
-  );
+const showAlert = (type, args) => {
+  const message = `[${type}]\n\n${args
+    .map((a) => stringifyValue(a))
+    .join("\n\n")}`;
+
+  alert(message);
 };
 
-const debugWarn = (...args) => {
-  console.warn(
-    "%c[STOCK WARN]",
-    "background:#aa7700;color:#fff;padding:2px 6px;border-radius:4px",
-    ...args
-  );
-};
+const debug = (...args) => showAlert("STOCK DEBUG", args);
+const debugError = (...args) => showAlert("STOCK ERROR", args);
+const debugWarn = (...args) => showAlert("STOCK WARN", args);
 
 /* =========================================================
    SAFE ARRAY
 ========================================================= */
 
 const safeArray = (value, label = "unknown") => {
-  debug(`safeArray called -> ${label}`, {
-    value,
-    type: typeof value,
-    isArray: Array.isArray(value),
-  });
+  debug("safeArray called", label, value);
 
   try {
     if (Array.isArray(value)) {
-      debug(`safeArray SUCCESS ARRAY -> ${label}`, {
-        length: value.length,
-      });
-
+      debug("safeArray array ok", label, value.length);
       return value;
     }
 
     if (value && typeof value === "object") {
-      const objectValues = Object.values(value);
-
-      debug(`safeArray OBJECT CONVERTED -> ${label}`, {
-        objectKeys: Object.keys(value),
-        convertedLength: objectValues.length,
-      });
-
-      return objectValues;
+      const objValues = Object.values(value);
+      debug("safeArray object converted", label, objValues.length);
+      return objValues;
     }
 
-    debugWarn(`safeArray RETURNING EMPTY ARRAY -> ${label}`, {
-      received: value,
-    });
-
+    debugWarn("safeArray empty return", label, value);
     return [];
   } catch (err) {
-    debugError(`safeArray FAILED -> ${label}`, err);
-
+    debugError("safeArray error", label, err);
     return [];
   }
 };
@@ -125,11 +114,7 @@ const getExpiryStatus = (expiryDate) => {
     (exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
   );
 
-  debug("Expiry Calculation", {
-    now,
-    exp,
-    daysLeft,
-  });
+  debug("expiry calc", { expiryDate, daysLeft });
 
   if (daysLeft < 0) return "expired";
   if (daysLeft <= 30) return "critical";
@@ -183,21 +168,10 @@ const ExpiryBadge = ({ expiryDate }) => {
   const { cls, icon } = configs[status];
 
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-black whitespace-nowrap",
-        cls
-      )}
-    >
+    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-black", cls)}>
       <span>{icon}</span>
-
       {label}
-
-      {status !== "ok" && (
-        <span className="opacity-60">
-          ({daysLeft}د)
-        </span>
-      )}
+      {status !== "ok" && <span>({daysLeft}د)</span>}
     </span>
   );
 };
@@ -211,31 +185,18 @@ const Stock = () => {
 
   const [batches, setBatches] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-
   const [searchTerm, setSearchTerm] = useState("");
   const [searchMode, setSearchMode] = useState("all");
-
-  const [selectedBatchIds, setSelectedBatchIds] =
-    useState([]);
-
+  const [selectedBatchIds, setSelectedBatchIds] = useState([]);
   const [deleteId, setDeleteId] = useState(null);
-
   const [openModal, setOpenModal] = useState(false);
-
-  const [editingStockProduct, setEditingStockProduct] =
-    useState(null);
-
-  const [batchEntryTarget, setBatchEntryTarget] =
-    useState(null);
-
-  const [expandedProducts, setExpandedProducts] =
-    useState(new Set());
-
+  const [editingStockProduct, setEditingStockProduct] = useState(null);
+  const [batchEntryTarget, setBatchEntryTarget] = useState(null);
+  const [expandedProducts, setExpandedProducts] = useState(new Set());
   const [invoiceDetails, setInvoiceDetails] = useState({
     supplier: "",
     invoiceNumber: "",
   });
-
   const [loading, setLoading] = useState(false);
 
   /* =========================================================
@@ -243,44 +204,20 @@ const Stock = () => {
   ========================================================= */
 
   useEffect(() => {
-    debug("FETCH SUPPLIERS EFFECT START");
-
     const fetchSuppliers = async () => {
       try {
-        debug("fetchSuppliers START");
+        debug("fetchSuppliers");
 
         const token = Cookies.get("token");
 
-        debug("TOKEN", token);
-
         const res = await axios.get("/api/suppliers", {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         });
 
-        debug("SUPPLIERS RESPONSE", res);
-
-        debug("SUPPLIERS RESPONSE DATA", res.data);
-
-        debug("SUPPLIERS TYPE", typeof res.data?.suppliers);
-
-        debug(
-          "SUPPLIERS IS ARRAY",
-          Array.isArray(res.data?.suppliers)
-        );
-
-        const normalizedSuppliers = safeArray(
-          res.data?.suppliers,
-          "suppliers"
-        );
-
-        debug("NORMALIZED SUPPLIERS", normalizedSuppliers);
-
-        setSuppliers(normalizedSuppliers);
+        const normalized = safeArray(res.data?.suppliers, "suppliers");
+        setSuppliers(normalized);
       } catch (err) {
-        debugError("FETCH SUPPLIERS FAILED", err);
-
+        debugError("suppliers error", err);
         setSuppliers([]);
       }
     };
@@ -292,15 +229,9 @@ const Stock = () => {
      FETCH BATCHES
   ========================================================= */
 
-  const fetchBatches = async (
-    query = "",
-    mode = "all"
-  ) => {
+  const fetchBatches = async (query = "", mode = "all") => {
     try {
-      debug("fetchBatches START", {
-        query,
-        mode,
-      });
+      debug("fetchBatches", query, mode);
 
       const token = Cookies.get("token");
 
@@ -309,81 +240,20 @@ const Stock = () => {
           ...(query && { q: query }),
           mode,
         },
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
-      debug("SEARCH RESPONSE FULL", response);
+      const products = safeArray(response.data?.products, "products");
 
-      debug("SEARCH RESPONSE DATA", response.data);
-
-      debug("PRODUCTS RAW", response.data?.products);
-
-      debug(
-        "PRODUCTS TYPE",
-        typeof response.data?.products
-      );
-
-      debug(
-        "PRODUCTS IS ARRAY",
-        Array.isArray(response.data?.products)
-      );
-
-      if (
-        response.data?.products &&
-        !Array.isArray(response.data?.products)
-      ) {
-        debugWarn("PRODUCTS IS NOT ARRAY", {
-          keys: Object.keys(response.data?.products || {}),
-          value: response.data?.products,
-        });
-      }
-
-      const products = safeArray(
-        response.data?.products,
-        "products"
-      );
-
-      debug("PRODUCTS AFTER SAFE ARRAY", products);
-
-      debug(
-        "PRODUCTS EVERY ITEM",
-        products.map((item, index) => ({
-          index,
-          type: typeof item,
-          item,
-        }))
-      );
-
-      const batchesList = products.map(
-        (batch, index) => {
-          debug("MAPPING BATCH", {
-            index,
-            batch,
-          });
-
-          return {
-            ...batch,
-            batchId: batch.batchId || batch._id,
-            originalQuantity: batch.quantity,
-          };
-        }
-      );
-
-      debug("FINAL BATCHES LIST", batchesList);
+      const batchesList = products.map((batch) => ({
+        ...batch,
+        batchId: batch.batchId || batch._id,
+        originalQuantity: batch.quantity,
+      }));
 
       setBatches(batchesList);
     } catch (error) {
-      debugError("fetchBatches FAILED", error);
-
-      debugError("ERROR RESPONSE", error?.response);
-
-      debugError(
-        "ERROR RESPONSE DATA",
-        error?.response?.data
-      );
-
+      debugError("fetchBatches error", error);
       setBatches([]);
     }
   };
@@ -393,16 +263,11 @@ const Stock = () => {
   ========================================================= */
 
   useEffect(() => {
-    debug("SEARCH EFFECT", {
-      searchTerm,
-      searchMode,
-    });
-
-    const timeout = setTimeout(() => {
+    const t = setTimeout(() => {
       fetchBatches(searchTerm, searchMode);
     }, 300);
 
-    return () => clearTimeout(timeout);
+    return () => clearTimeout(t);
   }, [searchTerm, searchMode]);
 
   /* =========================================================
@@ -410,32 +275,14 @@ const Stock = () => {
   ========================================================= */
 
   useEffect(() => {
-    debug("REALTIME EFFECT START");
-
-    const stockChannel = supabase
+    const channel = supabase
       .channel("stock_realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "products",
-        },
-        (payload) => {
-          debug("REALTIME EVENT", payload);
+      .on("postgres_changes", { event: "*", schema: "public", table: "products" }, () => {
+        fetchBatches(searchTerm, searchMode);
+      })
+      .subscribe();
 
-          fetchBatches(searchTerm, searchMode);
-        }
-      )
-      .subscribe((status) => {
-        debug("SUPABASE STATUS", status);
-      });
-
-    return () => {
-      debug("REMOVE CHANNEL");
-
-      supabase.removeChannel(stockChannel);
-    };
+    return () => supabase.removeChannel(channel);
   }, [searchTerm, searchMode]);
 
   /* =========================================================
@@ -443,117 +290,53 @@ const Stock = () => {
   ========================================================= */
 
   const groupedProducts = useMemo(() => {
-    debug("GROUPING PRODUCTS START");
-
-    debug("BATCHES BEFORE GROUP", batches);
-
     const groups = {};
 
-    safeArray(batches, "batches for grouping").forEach(
-      (batch, index) => {
-        debug("GROUP LOOP ITEM", {
-          index,
-          batch,
-        });
+    safeArray(batches, "group").forEach((batch) => {
+      const id = batch._id;
 
-        const productId = batch._id;
-
-        if (!groups[productId]) {
-          debug("CREATING NEW GROUP", productId);
-
-          groups[productId] = {
-            productId,
-            name: batch.name,
-            unit: batch.unit,
-            batches: [],
-            totalQuantity: 0,
-            lowestPrice: Infinity,
-            highestPrice: 0,
-          };
-        }
-
-        groups[productId].batches.push(batch);
-
-        groups[productId].totalQuantity +=
-          Number(batch.quantity) || 0;
-
-        groups[productId].lowestPrice = Math.min(
-          groups[productId].lowestPrice,
-          Number(batch.price) || 0
-        );
-
-        groups[productId].highestPrice = Math.max(
-          groups[productId].highestPrice,
-          Number(batch.price) || 0
-        );
+      if (!groups[id]) {
+        groups[id] = {
+          productId: id,
+          name: batch.name,
+          unit: batch.unit,
+          batches: [],
+          totalQuantity: 0,
+          lowestPrice: Infinity,
+          highestPrice: 0,
+        };
       }
-    );
 
-    debug("GROUPS OBJECT", groups);
+      groups[id].batches.push(batch);
+      groups[id].totalQuantity += Number(batch.quantity) || 0;
+      groups[id].lowestPrice = Math.min(groups[id].lowestPrice, Number(batch.price) || 0);
+      groups[id].highestPrice = Math.max(groups[id].highestPrice, Number(batch.price) || 0);
+    });
 
-    const finalGroups = safeArray(
-      Object.values(groups),
-      "grouped products"
-    );
-
-    debug("FINAL GROUPED PRODUCTS", finalGroups);
-
-    return finalGroups;
+    return Object.values(groups);
   }, [batches]);
 
   /* =========================================================
      UPDATE BATCH
   ========================================================= */
 
-  const updateBatchState = (
-    batchId,
-    changes
-  ) => {
-    debug("updateBatchState", {
-      batchId,
-      changes,
-    });
-
-    setBatches((prev) => {
-      debug("PREV BATCHES", prev);
-
-      const updated = safeArray(
-        prev,
-        "updateBatchState prev"
-      ).map((batch) =>
-        batch.batchId?.toString() ===
-        batchId?.toString()
-          ? { ...batch, ...changes }
-          : batch
-      );
-
-      debug("UPDATED BATCHES", updated);
-
-      return updated;
-    });
+  const updateBatchState = (batchId, changes) => {
+    setBatches((prev) =>
+      safeArray(prev, "update").map((b) =>
+        b.batchId === batchId ? { ...b, ...changes } : b
+      )
+    );
   };
 
   /* =========================================================
-     TOGGLE PRODUCT
+     TOGGLE
   ========================================================= */
 
-  const toggleProduct = (productId) => {
-    debug("toggleProduct", productId);
-
+  const toggleProduct = (id) => {
     setExpandedProducts((prev) => {
-      const newSet = new Set(prev);
-
-      if (newSet.has(productId)) {
-        debug("COLLAPSING", productId);
-
-        newSet.delete(productId);
-      } else {
-        debug("EXPANDING", productId);
-
-        newSet.add(productId);
-      }
-
-      return newSet;
+      const s = new Set(prev);
+      s.has(id) ? s.delete(id) : s.add(id);
+      return s;
     });
   };
 
@@ -565,34 +348,17 @@ const Stock = () => {
     if (!deleteId) return;
 
     try {
-      debug("DELETE START", deleteId);
-
       const token = Cookies.get("token");
 
-      const { productId, batchId } = deleteId;
-
-      const url = batchId
-        ? `/api/products?id=${productId}&batchId=${batchId}`
-        : `/api/products?id=${productId}`;
-
-      debug("DELETE URL", url);
-
-      const response = await axios.delete(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      await axios.delete(`/api/products?id=${deleteId.productId}`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
 
-      debug("DELETE RESPONSE", response);
-
-      toast.success("تم الحذف بنجاح");
-
+      toast.success("تم الحذف");
       fetchBatches(searchTerm, searchMode);
-
       setDeleteId(null);
     } catch (err) {
-      debugError("DELETE FAILED", err);
-
+      debugError("delete error", err);
       toast.error("فشل الحذف");
     }
   };
@@ -601,99 +367,41 @@ const Stock = () => {
      STATS
   ========================================================= */
 
-  const totalProducts = safeArray(
-    groupedProducts,
-    "totalProducts"
+  const totalProducts = groupedProducts.length;
+  const totalBatches = batches.length;
+
+  const expiringSoon = batches.filter((p) =>
+    ["critical", "warning"].includes(getExpiryStatus(p.expiryDate))
   ).length;
 
-  const totalBatches = safeArray(
-    batches,
-    "totalBatches"
+  const lowStock = batches.filter(
+    (p) => Number(p.quantity) > 0 && Number(p.quantity) <= 10
   ).length;
-
-  const expiringSoon = safeArray(
-    batches,
-    "expiringSoon"
-  ).filter((p) =>
-    ["critical", "warning"].includes(
-      getExpiryStatus(p.expiryDate)
-    )
-  ).length;
-
-  const lowStock = safeArray(
-    batches,
-    "lowStock"
-  ).filter(
-    (p) =>
-      Number(p.quantity) > 0 &&
-      Number(p.quantity) <= 10
-  ).length;
-
-  debug("FINAL STATS", {
-    totalProducts,
-    totalBatches,
-    expiringSoon,
-    lowStock,
-  });
 
   /* =========================================================
-     RENDER
+     UI
   ========================================================= */
 
   return (
-    <div
-      className="p-4 md:p-8 w-full min-h-screen flex flex-col gap-5"
-      dir="rtl"
-    >
+    <div className="p-4 md:p-8 w-full min-h-screen flex flex-col gap-5" dir="rtl">
       <div className="flex gap-3">
         <div className="relative flex-1">
           <Search className="absolute right-4 top-1/2 -translate-y-1/2 h-4 w-4" />
 
-          <Input
-            value={searchTerm}
-            onChange={(e) => {
-              debug(
-                "SEARCH INPUT CHANGE",
-                e.target.value
-              );
-
-              setSearchTerm(e.target.value);
-            }}
-            placeholder="ابحث..."
-            className="pr-10"
-          />
+          <Input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </div>
 
-        <Button
-          onClick={() => {
-            debug("OPEN CREATE PRODUCT MODAL");
-
-            setEditingStockProduct(null);
-
-            setOpenModal(true);
-          }}
-        >
+        <Button onClick={() => setOpenModal(true)}>
           <Plus className="h-4 w-4 ml-2" />
           منتج جديد
         </Button>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 border rounded-xl">
-          المنتجات: {totalProducts}
-        </div>
-
-        <div className="p-4 border rounded-xl">
-          الدفعات: {totalBatches}
-        </div>
-
-        <div className="p-4 border rounded-xl">
-          تنتهي قريباً: {expiringSoon}
-        </div>
-
-        <div className="p-4 border rounded-xl">
-          مخزون منخفض: {lowStock}
-        </div>
+        <div className="p-4 border rounded-xl">المنتجات: {totalProducts}</div>
+        <div className="p-4 border rounded-xl">الدفعات: {totalBatches}</div>
+        <div className="p-4 border rounded-xl">تنتهي قريباً: {expiringSoon}</div>
+        <div className="p-4 border rounded-xl">مخزون منخفض: {lowStock}</div>
       </div>
 
       <div className="border rounded-2xl overflow-hidden">
@@ -708,202 +416,76 @@ const Stock = () => {
           </TableHeader>
 
           <TableBody>
-            {groupedProducts.length === 0 ? (
-              <TableRow>
-                <TableCell
-                  colSpan={4}
-                  className="text-center py-10"
-                >
-                  لا توجد منتجات
-                </TableCell>
-              </TableRow>
-            ) : (
-              safeArray(
-                groupedProducts,
-                "render groupedProducts"
-              ).map((product, productIndex) => {
-                debug("RENDER PRODUCT", {
-                  productIndex,
-                  product,
-                });
+            {groupedProducts.map((product) => {
+              const isExpanded = expandedProducts.has(product.productId);
 
-                const isExpanded =
-                  expandedProducts.has(
-                    product.productId
-                  );
+              return (
+                <React.Fragment key={product.productId}>
+                  <TableRow onClick={() => toggleProduct(product.productId)}>
+                    <TableCell>{product.name}</TableCell>
+                    <TableCell>{product.totalQuantity}</TableCell>
+                    <TableCell>{product.lowestPrice}</TableCell>
+                    <TableCell>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteId({ productId: product.productId });
+                        }}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
 
-                return (
-                  <React.Fragment
-                    key={product.productId}
-                  >
-                    <TableRow
-                      onClick={() =>
-                        toggleProduct(
-                          product.productId
-                        )
-                      }
-                      className="cursor-pointer"
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {isExpanded ? (
-                            <ChevronDown />
-                          ) : (
-                            <ChevronRight />
-                          )}
-
-                          {product.name}
-                        </div>
-                      </TableCell>
-
-                      <TableCell>
-                        {product.totalQuantity}
-                      </TableCell>
-
-                      <TableCell>
-                        {product.lowestPrice}
-                      </TableCell>
-
-                      <TableCell>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-
-                            debug(
-                              "DELETE PRODUCT CLICK",
-                              product
-                            );
-
-                            setDeleteId({
-                              productId:
-                                product.productId,
-                            });
-                          }}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-
-                    {isExpanded &&
-                      safeArray(
-                        product.batches,
-                        "product batches render"
-                      ).map(
-                        (
-                          batch,
-                          batchIndex
-                        ) => {
-                          debug(
-                            "RENDER BATCH",
-                            {
-                              batchIndex,
-                              batch,
+                  {isExpanded &&
+                    product.batches.map((batch) => (
+                      <TableRow key={batch.batchId}>
+                        <TableCell>دفعة</TableCell>
+                        <TableCell>
+                          <Input
+                            value={batch.quantity || ""}
+                            onChange={(e) =>
+                              updateBatchState(batch.batchId, {
+                                quantity: e.target.value,
+                              })
                             }
-                          );
-
-                          return (
-                            <TableRow
-                              key={batch.batchId}
-                            >
-                              <TableCell className="pr-10">
-                                دفعة
-                              </TableCell>
-
-                              <TableCell>
-                                <Input
-                                  type="number"
-                                  value={
-                                    batch.quantity ||
-                                    ""
-                                  }
-                                  onChange={(e) =>
-                                    updateBatchState(
-                                      batch.batchId,
-                                      {
-                                        quantity:
-                                          e.target
-                                            .value,
-                                      }
-                                    )
-                                  }
-                                />
-                              </TableCell>
-
-                              <TableCell>
-                                <Input
-                                  type="number"
-                                  value={
-                                    batch.price || ""
-                                  }
-                                  onChange={(e) =>
-                                    updateBatchState(
-                                      batch.batchId,
-                                      {
-                                        price:
-                                          e.target
-                                            .value,
-                                      }
-                                    )
-                                  }
-                                />
-                              </TableCell>
-
-                              <TableCell>
-                                <ExpiryBadge
-                                  expiryDate={
-                                    batch.expiryDate
-                                  }
-                                />
-                              </TableCell>
-                            </TableRow>
-                          );
-                        }
-                      )}
-                  </React.Fragment>
-                );
-              })
-            )}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            value={batch.price || ""}
+                            onChange={(e) =>
+                              updateBatchState(batch.batchId, {
+                                price: e.target.value,
+                              })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <ExpiryBadge expiryDate={batch.expiryDate} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </React.Fragment>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
 
-      <Dialog
-        open={!!deleteId}
-        onOpenChange={(v) => {
-          debug("DELETE DIALOG CHANGE", v);
-
-          if (!v) {
-            setDeleteId(null);
-          }
-        }}
-      >
+      <Dialog open={!!deleteId} onOpenChange={(v) => !v && setDeleteId(null)}>
         <DialogContent>
           <div className="flex flex-col items-center gap-4">
             <AlertTriangle className="text-red-500" />
-
             <h2>تأكيد الحذف</h2>
 
             <div className="flex gap-3">
-              <Button
-                variant="destructive"
-                onClick={handleDelete}
-              >
+              <Button variant="destructive" onClick={handleDelete}>
                 حذف
               </Button>
-
-              <Button
-                variant="outline"
-                onClick={() => {
-                  debug(
-                    "DELETE CANCEL CLICK"
-                  );
-
-                  setDeleteId(null);
-                }}
-              >
+              <Button variant="outline" onClick={() => setDeleteId(null)}>
                 إلغاء
               </Button>
             </div>
@@ -914,67 +496,26 @@ const Stock = () => {
       <CreateProductForm
         openModal={openModal}
         setOpenModal={setOpenModal}
-        editingStockProduct={
-          editingStockProduct
-        }
-        setEditingStockProduct={
-          setEditingStockProduct
-        }
-        onSuccess={() => {
-          debug(
-            "CREATE PRODUCT SUCCESS"
-          );
-
-          fetchBatches(
-            searchTerm,
-            searchMode
-          );
-        }}
+        editingStockProduct={editingStockProduct}
+        setEditingStockProduct={setEditingStockProduct}
+        onSuccess={() => fetchBatches(searchTerm, searchMode)}
       />
 
       <BarcodeScanner
         onScan={(barcode) => {
-          debug("BARCODE SCANNED", barcode);
-
           setSearchTerm(barcode);
-
-          fetchBatches(
-            barcode,
-            searchMode
-          );
+          fetchBatches(barcode, searchMode);
         }}
       />
 
       {batchEntryTarget && (
         <BatchEntryDialog
           open={!!batchEntryTarget}
-          onClose={() => {
-            debug(
-              "BATCH ENTRY CLOSED"
-            );
-
-            setBatchEntryTarget(null);
-          }}
-          productName={
-            batchEntryTarget.name
-          }
-          productId={
-            batchEntryTarget.productId
-          }
-          suppliers={safeArray(
-            suppliers,
-            "batchEntry suppliers"
-          )}
-          onSuccess={() => {
-            debug(
-              "BATCH ENTRY SUCCESS"
-            );
-
-            fetchBatches(
-              searchTerm,
-              searchMode
-            );
-          }}
+          onClose={() => setBatchEntryTarget(null)}
+          productName={batchEntryTarget.name}
+          productId={batchEntryTarget.productId}
+          suppliers={suppliers}
+          onSuccess={() => fetchBatches(searchTerm, searchMode)}
         />
       )}
     </div>
