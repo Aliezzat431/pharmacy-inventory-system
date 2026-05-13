@@ -4,6 +4,8 @@ import { treatmentTypes } from '@/app/lib/unitOptions';
 import { supabase } from '@/app/lib/supabase';
 import { logActivity } from '@/app/lib/logActivity';
 import { updateProductShortcomingStatus } from '@/app/lib/productHelpers';
+import { productBatchesBodySchema } from '@/app/lib/validation/schemas';
+import { parseAndValidate } from '@/app/lib/validation/request';
 
 // ============================================================
 // POST - إضافة دفعة جديدة لمنتج (أو إنشاء منتج جديد مع دفعة)
@@ -15,26 +17,67 @@ export async function POST(req) {
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await req.json();
-    if (!Array.isArray(body) || body.length === 0) {
-      return NextResponse.json({ error: "يجب إرسال قائمة دفعات صحيحة." }, { status: 400 });
+    if (!supabase) {
+      return NextResponse.json(
+        { success: false, message: "قاعدة البيانات غير مهيأة" },
+        { status: 503 }
+      );
     }
+
+    const parsed = await parseAndValidate(req, productBatchesBodySchema);
+    if (!parsed.ok) {
+      return NextResponse.json(parsed.body, { status: parsed.status });
+    }
+
+    const body = parsed.data;
 
     const addedBatches = [];
     let totalCost = 0;
     const reasonParts = [];
 
     for (const batchData of body) {
-      let {
-        name, type, quantity, barcode, unitConversion, expiryDate,
-        purchasePrice, salePrice, company, details, supplier, invoiceNumber, isGift
+      const {
+        name,
+        type,
+        quantity,
+        barcode,
+        unitConversion,
+        expiryDate,
+        purchasePrice,
+        salePrice,
+        company,
+        details,
+        supplier,
+        invoiceNumber,
+        isGift,
       } = batchData;
 
-      if (!name || quantity === undefined) throw new Error("اسم المنتج والكمية مطلوبان.");
+      if (expiryDate != null && expiryDate !== "") {
+        const exp = new Date(expiryDate);
+        if (Number.isNaN(exp.getTime())) {
+          return NextResponse.json(
+            {
+              success: false,
+              message: `تاريخ انتهاء غير صالح للمنتج "${name}"`,
+            },
+            { status: 400 }
+          );
+        }
+      }
 
-      const parsedQuantity = Number(quantity);
-      const parsedPurchasePrice = isGift ? 0 : Number(purchasePrice);
-      const parsedSalePrice = isGift ? 0 : Number(salePrice);
+      const parsedQuantity = quantity;
+      const parsedPurchasePrice = isGift ? 0 : purchasePrice ?? 0;
+      const parsedSalePrice = isGift ? 0 : salePrice ?? 0;
+
+      if (!isGift && (parsedPurchasePrice <= 0 || parsedSalePrice <= 0)) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: `أسعار الشراء/البيع مطلوبة وأكبر من صفر للمنتج "${name}" (ما لم تكن هدية)`,
+          },
+          { status: 400 }
+        );
+      }
 
       // 1. Find or create product
       let { data: product, error: findError } = await supabase
@@ -46,17 +89,26 @@ export async function POST(req) {
       if (findError && findError.code !== 'PGRST116') throw findError;
 
       if (!product) {
-        const typeDef = treatmentTypes.find(t => t.name === type);
-        if (!typeDef) throw new Error(`النوع "${type}" غير معروف.`);
+        const resolvedType = type ?? "دواء عادي برشام";
+        const typeDef = treatmentTypes.find((t) => t.name === resolvedType);
+        if (!typeDef) {
+          return NextResponse.json(
+            {
+              success: false,
+              message: `النوع "${resolvedType}" غير معروف للمنتج "${name}".`,
+            },
+            { status: 400 }
+          );
+        }
 
         // Create product
         const { data: newProd, error: createError } = await supabase
           .from('products')
           .insert({
             name: name.trim(),
-            type: type || 'دواء عادي برشام',
+            type: resolvedType,
             unit: typeDef.baseUnit,
-            unit_conversion: unitConversion ? Number(unitConversion) : 1,
+            unit_conversion: unitConversion != null ? Number(unitConversion) : 1,
             company: company || 'غير محدد',
             details: details || '',
             inventory_method: 'FEFO',

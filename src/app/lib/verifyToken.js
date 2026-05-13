@@ -28,8 +28,14 @@ export async function verifyToken(headers, returnToken = false) {
 
   if (!token) return null;
 
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    console.error("verifyToken: JWT_SECRET is not set");
+    return null;
+  }
+
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, secret);
     return returnToken ? { user: decoded, token } : decoded;
   } catch (err) {
     console.error("❌ JWT verification failed:", err.message);

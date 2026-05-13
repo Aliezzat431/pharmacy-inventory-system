@@ -79,5 +79,14 @@ export async function callInternalAPI(endpoint, method, token, body = null) {
         throw new Error(data.error || data.message || 'فشلت العملية');
     }
 
+    if (
+        data &&
+        typeof data === 'object' &&
+        data.success === true &&
+        Object.prototype.hasOwnProperty.call(data, 'data')
+    ) {
+        return data.data;
+    }
+
     return data;
 }

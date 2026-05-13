@@ -1,49 +1,50 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/app/lib/supabase";
 import { verifyToken } from "@/app/lib/verifyToken";
+import { companyNameSchema } from "@/app/lib/validation/schemas";
+import { parseAndValidate } from "@/app/lib/validation/request";
 
-// =======================
-// RESPONSE HELPERS
-// =======================
-const ok = (data) =>
-  NextResponse.json({
-    success: true,
-    data,
-  });
+const DEBUG = process.env.DEBUG_API === "1";
 
-const fail = (error, status = 500, details = null, code = null) =>
-  NextResponse.json(
-    {
-      success: false,
-      error,
-      details,
-      code,
-    },
+function log(...args) {
+  if (DEBUG) console.log("[api/companies]", ...args);
+}
+
+function ok(data) {
+  return NextResponse.json({ success: true, data });
+}
+
+function fail(message, status = 500, details = null) {
+  return NextResponse.json(
+    { success: false, error: message, details },
     { status }
   );
+}
 
-// =======================
-// GET ALL COMPANIES
-// =======================
 export async function GET(req) {
   try {
-    const user = await verifyToken(req.headers);
+    if (!supabase) {
+      return fail("قاعدة البيانات غير مهيأة", 503);
+    }
 
+    const user = await verifyToken(req.headers);
+    log("GET user", user?.username);
     if (!user) {
       return fail("Unauthorized", 401);
     }
 
-    const { data, error } = await supabase
-      .from("companies")
-      .select("*")
-      .order("name", { ascending: true });
+    const { data, error } = await supabase.from("companies").select("*");
 
     if (error) {
-      console.error("GET companies error:", error);
-      return fail("Supabase error", 500, error.message, error.code);
+      console.error("[api/companies] GET supabase:", error);
+      return fail("Supabase Error", 500, error.message);
     }
 
-    const formatted = (data || []).map((c) => ({
+    if (!data?.length) {
+      return ok([]);
+    }
+
+    const formatted = data.map((c) => ({
       _id: c.id,
       id: c.id,
       name: c.name,
@@ -52,141 +53,58 @@ export async function GET(req) {
 
     return ok(formatted);
   } catch (error) {
-    console.error("GET CATCH ERROR:", error);
-    return fail("فشل في جلب الشركات", 500, error.message);
+    console.error("[api/companies] GET:", error);
+    return fail("Server error", 500, error.message);
   }
 }
 
-// =======================
-// CREATE COMPANY
-// =======================
 export async function POST(req) {
   try {
-    const user = await verifyToken(req.headers);
+    if (!supabase) {
+      return fail("قاعدة البيانات غير مهيأة", 503);
+    }
 
+    const user = await verifyToken(req.headers);
     if (!user) {
       return fail("Unauthorized", 401);
     }
 
-    const body = await req.json();
-    const name = body?.name?.trim();
-
-    if (!name || name.length < 3) {
-      return fail("اسم الشركة غير صالح", 400);
+    const parsed = await parseAndValidate(req, companyNameSchema);
+    if (!parsed.ok) {
+      return NextResponse.json(parsed.body, { status: parsed.status });
     }
 
-    // check duplicate
-    const { data: existing } = await supabase
+    const { name } = parsed.data;
+
+    const { data: duplicates, error: dupErr } = await supabase
       .from("companies")
       .select("id")
       .ilike("name", name)
-      .maybeSingle();
+      .limit(1);
 
-    if (existing) {
-      return fail("الاسم موجود بالفعل", 409);
+    if (dupErr) {
+      console.error("[api/companies] duplicate check:", dupErr);
+      return fail("Supabase Error", 500, dupErr.message);
     }
 
-    const { data, error } = await supabase
+    if (duplicates?.length > 0) {
+      return fail("Company exists", 409);
+    }
+
+    const { data: inserted, error: insertErr } = await supabase
       .from("companies")
       .insert({ name })
       .select()
       .single();
 
-    if (error) {
-      console.error("INSERT ERROR:", error);
-      return fail("فشل في إنشاء الشركة", 500, error.message, error.code);
+    if (insertErr) {
+      console.error("[api/companies] insert:", insertErr);
+      return fail("Supabase Error", 500, insertErr.message);
     }
 
-    return ok({
-      _id: data.id,
-      id: data.id,
-      name: data.name,
-    });
+    return ok(inserted);
   } catch (error) {
-    console.error("POST CATCH ERROR:", error);
-    return fail("فشل في إنشاء الشركة", 500, error.message);
-  }
-}
-
-// =======================
-// UPDATE COMPANY
-// =======================
-export async function PATCH(req) {
-  try {
-    const user = await verifyToken(req.headers);
-
-    if (!user) {
-      return fail("Unauthorized", 401);
-    }
-
-    const { id, name } = await req.json();
-
-    if (!id || !name) {
-      return fail("Missing id or name", 400);
-    }
-
-    const { data, error } = await supabase
-      .from("companies")
-      .update({ name: name.trim() })
-      .eq("id", id)
-      .select()
-      .single();
-
-    if (error) {
-      if (error.code === "23505") {
-        return fail("الاسم موجود بالفعل", 409);
-      }
-
-      console.error("UPDATE ERROR:", error);
-      return fail("فشل في التحديث", 500, error.message, error.code);
-    }
-
-    if (!data) {
-      return fail("Company not found", 404);
-    }
-
-    return ok({
-      _id: data.id,
-      id: data.id,
-      name: data.name,
-    });
-  } catch (error) {
-    console.error("PATCH CATCH ERROR:", error);
-    return fail("فشل في التحديث", 500, error.message);
-  }
-}
-
-// =======================
-// DELETE COMPANY
-// =======================
-export async function DELETE(req) {
-  try {
-    const user = await verifyToken(req.headers);
-
-    if (!user) {
-      return fail("Unauthorized", 401);
-    }
-
-    const { searchParams } = new URL(req.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return fail("Missing id", 400);
-    }
-
-    const { error } = await supabase
-      .from("companies")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      console.error("DELETE ERROR:", error);
-      return fail("فشل في الحذف", 500, error.message, error.code);
-    }
-
-    return ok({ id });
-  } catch (error) {
-    console.error("DELETE CATCH ERROR:", error);
-    return fail("فشل في الحذف", 500, error.message);
+    console.error("[api/companies] POST:", error);
+    return fail("Server error", 500, error.message);
   }
 }

@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 
 export function middleware(req) {
   const origin = req.headers.get("origin");
-  console.log(`got`);
+  if (process.env.DEBUG_API === "1") {
+    console.log("[middleware]", req.method, req.nextUrl.pathname);
+  }
   
   if (req.method === "OPTIONS") {
     return new NextResponse(null, {
